@@ -136,8 +136,9 @@ in every process, TLS, `odsign`). `crypto/build-boringssl.sh` builds the same up
 module + integrity hash, `OPENSSL_SMALL`, `BORINGSSL_ANDROID_SYSTEM`, static hidden libc++,
 `-Bsymbolic`) but `-march=x86-64-v3`: CPUID checks are real again, so Arrow Lake keeps every fast
 path and Haswell/Broadwell run plain AES-NI/SSSE3/AVX2 code natively. Installed over
-`/system/lib64` and `/vendor/lib64` `libcrypto.so` + `libssl.so` only if the exported dynamic
-symbols (names, types, binding, data sizes) equal the image's. The emulator (incl. the AES/CLMUL
+`/system/lib64` and `/vendor/lib64` `libcrypto.so` + `libssl.so` only if they export every
+dynamic symbol the image's do (names, types, binding, data sizes; extra exports allowed, so a
+newer pinned commit in `versions.env` can pass — struct layouts and behaviour aren't checked). The emulator (incl. the AES/CLMUL
 fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup screen 4:02 → 2:08
 (docs/02). The copies inside signed APEXes (Java crypto, TLS, Wi-Fi, Bluetooth):
 

@@ -9,7 +9,8 @@
 # single copy. The release tarball is downloaded and unpacked once (cache).
 set -euo pipefail
 T=$1; FW=$T/firmware; F=$(dirname "$0")
-TAG=${CHURRO_LINUX_FIRMWARE:-20260916}
+. "$(dirname "$0")/../../versions.env"   # linux-firmware, sof-bin, wireless-regdb
+TAG=$CHURRO_LINUX_FIRMWARE
 C=${CHURRO_CACHE:-/var/cache/churro}/linux-firmware-$TAG; mkdir -p "$C"
 # the release tarball, unpacked once (thousands of files: one download beats one request each)
 if [ ! -f "$C/.unpacked" ]; then
@@ -71,7 +72,7 @@ done > "$M/added"
 
 # Firmware outside linux-firmware: Intel audio DSP firmware + topologies (SOF, sof-bin release;
 # the driver picks files by platform and codec at runtime) and the Wi-Fi regulatory database.
-SOF=${CHURRO_SOF:-2026.09.2}; S=${CHURRO_CACHE:-/var/cache/churro}/sof
+SOF=$CHURRO_SOF; S=${CHURRO_CACHE:-/var/cache/churro}/sof
 mkdir -p "$S"; [ -s "$S/sof-bin-$SOF.tar.gz" ] || { curl -fsSL --retry 3 -o "$S/t.tmp" \
   "https://github.com/thesofproject/sof-bin/releases/download/v$SOF/sof-bin-$SOF.tar.gz"; mv "$S/t.tmp" "$S/sof-bin-$SOF.tar.gz"; }
 tar xzf "$S/sof-bin-$SOF.tar.gz" -C "$M"
@@ -81,7 +82,7 @@ for d in "$M/sof-bin-$SOF"/sof*; do   # merge per file, never overwrite: the ima
     [ -e "$FW/intel/$r" ] || [ -L "$FW/intel/$r" ] || echo "$FW/intel/$r"; done >> "$M/added"
   tar cf - -C "$M/sof-bin-$SOF" "${d##*/}" | tar xf - -C "$FW/intel" --skip-old-files --no-same-owner
 done
-RDB=${CHURRO_REGDB:-master-2026-09-03}
+RDB=$CHURRO_REGDB
 for f in regulatory.db regulatory.db.p7s; do
   [ -e "$FW/$f" ] && continue
   [ -s "$S/$RDB-$f" ] || curl -fsSL --retry 3 -o "$S/$RDB-$f" \

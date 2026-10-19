@@ -80,6 +80,7 @@ downloads from Google's public servers (GKI source/toolchains, emulator image) o
 | Path | What |
 |---|---|
 | `churro.sh` | `auto` / `build` / `install` |
+| `versions.env` | every pinned version the build downloads (kernel driver config, firmware, Mesa, NDK, emulator image, BoringSSL, tools), one section each |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
 | `features/` | partition overlays + patch scripts (`security-software`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `security-trusty-vm`) |
 | `crypto/` | BoringSSL build for Android (`build-boringssl.sh`) |

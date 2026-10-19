@@ -10,7 +10,8 @@
 set -euo pipefail
 W=$(mkdir -p "$1" && cd "$1" && pwd) V=$2
 HERE=$(cd "$(dirname "$0")" && pwd)
-NDK=${CHURRO_NDK:-$(ls -d "${CHURRO_MESA:?}"/../android-ndk-* | head -1)}
+. "$(dirname "$0")/../versions.env"
+NDK=${CHURRO_NDK:-${CHURRO_MESA:?}/../android-ndk-$NDK_VER}
 SYS=${CHURRO_MESA_SYSROOT:?}                       # static libdrm from build-mesa.sh
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 API=35 SDK=37                                      # NDK target / Android 17 (Google's build flag)

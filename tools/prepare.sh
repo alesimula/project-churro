@@ -58,8 +58,10 @@ mkdir -p "$S/bin"
 [ -x "$S/bin/pahole" ] || PAHOLE_VER=$PAHOLE bash "$HERE/tools/build-pahole.sh" "$S/bin"
 
 # --- 3. Churro kernel + module packs ---
-# cache key includes profile + patches + build script: changing any of them rebuilds the kernel
-KH=$(cat "$HERE/kmod/profiles/$PROF.conf" "$HERE/kmod/build-kernel.sh" "$HERE"/kmod/patches/*.patch 2>/dev/null | md5sum | cut -c1-8)
+# cache key includes profile + patches + build script + the distro config tag (versions.env):
+# changing any of them rebuilds the kernel. Only that one value, so other version bumps don't.
+. "$HERE/versions.env"
+KH=$({ cat "$HERE/kmod/profiles/$PROF.conf" "$HERE/kmod/build-kernel.sh" "$HERE"/kmod/patches/*.patch 2>/dev/null; echo "$ARCH_LINUX_CONFIG_TAG"; } | md5sum | cut -c1-8)
 K=$C/kernel-$PROF-$BID-$KH
 bash "$HERE/tools/extract-certs.sh" "$W/vmlinux" > "$W/gki-certs.pem"
 grep -q BEGIN "$W/gki-certs.pem" || { echo "no signing certificate found in the image kernel" >&2; exit 1; }
@@ -86,7 +88,7 @@ bash "$HERE/tools/make-pack.sh" "$MD" "$P/wifi" cfg80211 mac80211 ath9k
 
 # --- 4. Mesa (rebuilt when its build script or patches change; NVK's Rust parts use the
 #     kernel's Android Rust toolchain + bindgen) ---
-MH=$(cat "$HERE/gfx/build-mesa.sh" "$HERE"/gfx/mesa-patches/*.patch 2>/dev/null | md5sum | cut -c1-8)
+MH=$({ cat "$HERE/gfx/build-mesa.sh" "$HERE"/gfx/mesa-patches/*.patch 2>/dev/null; echo "$MESA_VER $LIBDRM_VER $NDK_VER"; } | md5sum | cut -c1-8)
 if [ ! -f "$C/mesa/.built-$MH" ]; then
   CHURRO_RUST=$S/rust CHURRO_BINDGEN=$S/bin CHURRO_CLANG=$S/clang bash "$HERE/gfx/build-mesa.sh" "$C/mesa"
   rm -f "$C"/mesa/.built-*; touch "$C/mesa/.built-$MH"

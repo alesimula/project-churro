@@ -9,8 +9,8 @@
 set -euo pipefail
 V=$1
 CACHE=${CHURRO_CACHE:-/var/cache/churro}
-EMU_URL=${CHURRO_EMU_URL:-https://dl.google.com/android/repository/sys-img/google_apis/x86_64-37.0_r06.zip}
-EMU_SHA1=${CHURRO_EMU_SHA1:-629e507fd5b737c2c836b12b52c81cd0e3b12399}
+. "$(dirname "$0")/../../versions.env"
+EMU_URL=$CHURRO_EMU_URL EMU_SHA1=$CHURRO_EMU_SHA1
 
 for n in android.hardware.gatekeeper-service.trusty android.hardware.security.secretkeeper.trusty \
          android.hardware.security.secretkeeper.trusty.desktop android.hardware.weaver-service.android-desktop \

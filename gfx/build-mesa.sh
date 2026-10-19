@@ -13,8 +13,7 @@
 set -euo pipefail
 WORK=$1
 HERE=$(cd "$(dirname "$0")" && pwd)
-MESA_VER=${MESA_VER:-26.2.4}
-NDK_VER=${NDK_VER:-r28c}
+. "$HERE/../versions.env"   # MESA_VER, NDK_VER, LIBDRM_VER
 API=${ANDROID_API:-35}
 RUST=${CHURRO_RUST:?} BINDGEN=${CHURRO_BINDGEN:?}
 # bindgen: libclang and the clang it asks for include dirs must be the same version
@@ -66,7 +65,6 @@ if [ ! -x "$WORK/host-tools/bin/mesa_clc" ]; then
 fi
 export PATH=$WORK/host-tools/bin:$PATH
 # libdrm for the target (Mesa won't take it as a subproject here): cross-build into a sysroot
-LIBDRM_VER=${LIBDRM_VER:-2.4.133}
 SYS=$WORK/sysroot
 if [ ! -f "$SYS/lib64/pkgconfig/libdrm.pc" ]; then
   (cd "$WORK" && { [ -d "libdrm-$LIBDRM_VER" ] || curl -fsSL "https://dri.freedesktop.org/libdrm/libdrm-$LIBDRM_VER.tar.xz" | tar -xJ; } \

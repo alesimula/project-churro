@@ -2,7 +2,7 @@
 # Distro erofs-utils (Ubuntu 24.04: 1.7.1) can't extract xattrs; build a newer one into tools/bin.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
-VER=${EROFS_VER:-v1.8.10}
+. "$HERE/../versions.env"; VER=$EROFS_VER
 command -v autoreconf >/dev/null || apt-get install -y -qq autoconf automake libtool pkg-config liblz4-dev uuid-dev libselinux1-dev zlib1g-dev >/dev/null
 T=$(mktemp -d); trap 'rm -rf "$T"' EXIT
 git -c advice.detachedHead=false clone -q --depth 1 -b "$VER" https://github.com/erofs/erofs-utils.git "$T/src"

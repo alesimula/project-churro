@@ -9,6 +9,7 @@
 set -euo pipefail
 SRC=$1 CLANG=$2 RUST=$3 BINDGEN=$4 CFG=$5 REL=$6 PROF=$7 OUT=$8
 HERE=$(cd "$(dirname "$0")" && pwd)
+. "$HERE/../versions.env"   # ARCH_LINUX_CONFIG_TAG, used by the profile
 Y="" M="" N=""; . "$HERE/profiles/$PROF.conf"
 export PATH="$CLANG/bin:$RUST/bin:$BINDGEN:$PATH"
 # bindgen must use the Android clang's libclang, not a distro one (unknown -W options otherwise)
@@ -46,7 +47,9 @@ for c in $Y; do SC -e "$c"; done; for c in $M; do SC -m "$c"; done; for c in $N;
 # distro module set (profile DISTRO_*): options the distro builds as modules that we don't have
 # yet, limited to driver directories (Kconfig file that defines the symbol)
 if [ -n "${DISTRO_CONFIG:-}" ]; then
-  [ -s "$O/distro.config" ] || curl -fsSL --retry 3 -o "$O/distro.config" "$DISTRO_CONFIG"
+  # cached per URL: a new ARCH_LINUX_CONFIG_TAG downloads its config again
+  [ -s "$O/distro.config" ] && [ "$(cat "$O/distro.url" 2>/dev/null)" = "$DISTRO_CONFIG" ] ||
+    { curl -fsSL --retry 3 -o "$O/distro.config" "$DISTRO_CONFIG"; echo "$DISTRO_CONFIG" > "$O/distro.url"; }
   (cd "$SRC" && grep -rH -E '^(menu)?config [A-Za-z0-9_]+' --include='Kconfig*' . ) |
     sed -E 's#^\./([^:]+):(menu)?config ([A-Za-z0-9_]+).*#\3 \1#' | sort -u -k1,1 > "$O/sym2file"
   grep -oE '^CONFIG_[A-Za-z0-9_]+=m$' "$O/distro.config" | sed 's/^CONFIG_//; s/=m$//' | sort -u |

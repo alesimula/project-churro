@@ -8,20 +8,17 @@
 # OPENSSL_SMALL, BORINGSSL_ANDROID_SYSTEM, static and hidden libc++, -Bsymbolic), but
 # -march=x86-64-v3: the CPUID checks are real again, so new CPUs keep every fast path and old
 # ones take the code they can run.
-# Version: the image's BoringSSL is newer than AOSP's android17-release (upstream d32c35e5, Jan
-# 2026). Its exports pin it between upstream d03dbc3e5 (2026-05-12, adds
-# SSL_get_signature_algorithm_used, which it exports) and 956bac6e4 (2026-05-22, adds
-# CBS_get_u48, which it doesn't); every commit in between has the same exported API. REV is the
-# newest of them (includes that window's fixes). A new recovery image: redo this, the ABI gate
-# below fails until REV matches.
-# ABI gate: the result must export exactly the image's dynamic symbols (names, types, binding,
-# data object sizes), else the build stops.
+# Version: BORINGSSL_REV in versions.env (how it was found: there). The image's BoringSSL is
+# newer than AOSP's android17-release (upstream d32c35e5, Jan 2026).
+# ABI gate: the result must export every dynamic symbol the image's library exports (same name,
+# type, binding and data object size), else the build stops; extra exports (a newer REV) are
+# allowed and counted. A new recovery image: the gate tells whether REV still fits.
 # Usage: crypto/build-boringssl.sh <work dir> <image lib64 dir>   -> <work dir>/out/lib{crypto,ssl}.so
 set -euo pipefail
 W=$(mkdir -p "$1" && cd "$1" && pwd) IMG=$2
-NDK=${CHURRO_NDK:-$(ls -d "${CHURRO_MESA:?}"/../android-ndk-* | head -1)}
-REV=e2da59b2d9e85f20a87d4b9116bc4a3de3525603      # boringssl.googlesource.com, 2026-05-22
-GOV=1.25.14 GOSHA=a21ae5633a269bcd7e90cf767e48225633795e99d831742cbf3397064fee7712   # go.mod: go 1.25.0
+. "$(dirname "$0")/../versions.env"
+NDK=${CHURRO_NDK:-${CHURRO_MESA:?}/../android-ndk-$NDK_VER}
+REV=$BORINGSSL_REV GOV=$BORINGSSL_GO_VER GOSHA=$BORINGSSL_GO_SHA256
 ARCH=x86-64-v3                                    # Haswell+ / Zen: the rest of the image's floor
 
 dl() {  # <url> <dest file>
@@ -83,15 +80,20 @@ for l in crypto ssl; do
   "$T/bin/llvm-strip" --strip-unneeded -o "$W/out/lib$l.so" "$B/lib$l.so"
 done
 
-# --- ABI gate: same exported dynamic symbols as the image's libraries ---
+# --- ABI gate: every dynamic symbol the image's libraries export, ours export too ---
 syms() { readelf --dyn-syms -W "$1" | awk '$7 != "UND" && $5 != "LOCAL" && NF >= 8 {
-  sub(/@.*/, "", $8); if ($8 != "__llvm_fs_discriminator__") print $8, $4, $5, ($4 == "OBJECT" ? $3 : "")}' | sort -u; }
+  sub(/@.*/, "", $8); if ($8 != "__llvm_fs_discriminator__") print $8, $4, $5, ($4 == "OBJECT" ? $3 : "")}' | LC_ALL=C sort -u; }
 # (__llvm_fs_discriminator__: a marker of Google's AutoFDO build, imported by nothing)
-bad=0
+bad=0 info=""
 for l in crypto ssl; do
-  diff <(syms "$IMG/lib$l.so") <(syms "$W/out/lib$l.so") > "$W/abi-$l.diff" || {
-    echo "lib$l.so: exports differ from the image's ($(grep -c '^[<>]' "$W/abi-$l.diff") lines, $W/abi-$l.diff)" >&2; bad=1; }
+  syms "$IMG/lib$l.so" > "$W/abi-$l.image"; syms "$W/out/lib$l.so" > "$W/abi-$l.ours"
+  LC_ALL=C comm -23 "$W/abi-$l.image" "$W/abi-$l.ours" > "$W/abi-$l.missing"
+  extra=$(LC_ALL=C comm -13 "$W/abi-$l.image" "$W/abi-$l.ours" | wc -l)
+  if [ -s "$W/abi-$l.missing" ]; then
+    echo "lib$l.so: $(wc -l < "$W/abi-$l.missing") of the image's exports missing or different ($W/abi-$l.missing)" >&2; bad=1
+  fi
+  info="$info lib$l $(wc -l < "$W/abi-$l.image") exports present, $extra extra;"
 done
 [ "$bad" = 0 ] || exit 1
 grep -q BORINGSSL_integrity_test <(readelf --dyn-syms -W "$W/out/libcrypto.so") || { echo "libcrypto.so: not a FIPS build" >&2; exit 1; }
-echo "   BoringSSL $REV (-march=$ARCH, FIPS): libcrypto $(stat -c %s "$W/out/libcrypto.so") B, libssl $(stat -c %s "$W/out/libssl.so") B; exports identical to the image's"
+echo "   BoringSSL $REV (-march=$ARCH, FIPS): libcrypto $(stat -c %s "$W/out/libcrypto.so") B, libssl $(stat -c %s "$W/out/libssl.so") B;$info"

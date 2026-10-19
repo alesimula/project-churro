@@ -213,11 +213,12 @@ files get a sibling's label or an explicit one.
   `prepare.sh`) and downloads the source + a pinned Go (checksummed; only runs the FIPS hash
   injector). libc++ is static and hidden, compiled in the platform `std::__1` namespace because
   libcrypto exports two C++ helpers taking `std::atomic`. The build stops unless both libraries
-  export exactly the image's dynamic symbols. System is the first feature partition mounted at
+  export every dynamic symbol the image's do (same type, binding, data size; extras are allowed
+  and counted, so a newer `BORINGSSL_REV` in `versions.env` can pass — layouts aren't checked). System is the first feature partition mounted at
   `/` (`patch-system.sh`, files under `system/`). New recovery image: the gate tells whether
   `REV` still matches. The 11 APEX copies of the same libraries (Conscrypt, Tethering, Wi-Fi,
-  Bluetooth, ...) are covered by bind mounts at boot (`churro-apex-crypto.rc`), not by repacking
-  the signed APEXes. Not covered: Tethering's `libcrypto_httpengine.so` (Cronet's own BoringSSL).
+  Bluetooth, ...) are meant to be covered by bind mounts at boot (`churro-apex-crypto.rc`), not
+  by repacking the signed APEXes — not working yet: SELinux denies init `mounton` on those files. Not covered: Tethering's `libcrypto_httpengine.so` (Cronet's own BoringSSL).
 * NPU: `intel_vpu` is blacklisted unless `CHURRO_NPU=true` (top of `churro.sh`): the image only
   has Panther Lake NPU firmware and on Arrow Lake the failed probe froze the machine.
 * `debug-log` (default) — boot log to a file you can read from Windows. The "debug" GRUB entries
@@ -259,7 +260,8 @@ unpinned.
 Files involved (each has comments explaining the why):
 | File | Role |
 |---|---|
-| `kmod/profiles/generic.conf` | `DISTRO_CONFIG` (URL of the pinned distro config), `DISTRO_DIRS` (regex: Kconfig file locations whose modules are taken), `DISTRO_DENY` (regex: symbols never taken), optional `DISTRO_BUILTIN_OK` (space-separated core options checked to be harmless) |
+| `versions.env` | every pinned version: Arch config tag, linux-firmware, sof-bin, wireless-regdb, Mesa/libdrm/NDK, emulator image, BoringSSL + Go, erofs-utils |
+| `kmod/profiles/generic.conf` | `DISTRO_CONFIG` (URL of the pinned distro config, tag from `versions.env`), `DISTRO_DIRS` (regex: Kconfig file locations whose modules are taken), `DISTRO_DENY` (regex: symbols never taken), optional `DISTRO_BUILTIN_OK` (space-separated core options checked to be harmless) |
 | `kmod/build-kernel.sh` | the `if [ -n "${DISTRO_CONFIG:-}" ]` block: picks the symbols, adds them as `=m`, keeps core-struct options off (follows `select`/`imply` chains), refuses to weaken built-ins |
 | `tools/prepare.sh` | kABI check after the build: all GKI export CRCs must equal Google's `vmlinux.symvers`, else the kernel is rejected; copies `Module.symvers` into the kernel cache dir |
 | `features/drivers-extra/patch-vendor_dlkm.sh` (+ `skip.txt`) | installs every module of our build that the image lacks into vendor_dlkm, after a `depmod -e -E` ABI check against the image's own modules; prints what it left out and why |
@@ -272,10 +274,11 @@ Steps:
    different Kconfig symbols). Arch Linux keeps one per release tag:
    `https://gitlab.archlinux.org/archlinux/packaging/packages/linux/-/raw/<tag>/config`, tags
    look like `6.18.9.arch1-1` (list them on that repo's tags page; not every point release has
-   one). Put the URL in `DISTRO_CONFIG`. Any distro's full kernel config works the same way
-   (Debian/Fedora), as long as the version matches.
-3. Firmware pins (defaults at the top of `features/firmware-extra/patch-vendor.sh`, or override
-   with the env vars): linux-firmware = a release tag present on
+   one). Put the tag in `ARCH_LINUX_CONFIG_TAG` (`versions.env`). Any distro's full kernel
+   config works the same way (Debian/Fedora), as long as the version matches: then change the
+   `DISTRO_CONFIG` URL in the profile.
+3. Firmware pins (`versions.env`, "Firmware" section, or override with the env vars):
+   linux-firmware = a release tag present on
    `https://cdn.kernel.org/pub/linux/kernel/firmware/` (`linux-firmware-<YYYYMMDD>.tar.xz`);
    sof-bin = a release of `github.com/thesofproject/sof-bin` (version without the `v`);
    wireless-regdb = a `master-YYYY-MM-DD` tag of `git.kernel.org/…/wens/wireless-regdb.git`.
