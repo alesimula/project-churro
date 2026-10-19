@@ -4,9 +4,11 @@ Make **Googlebook OS** (Android 17 "android-desktop" / Aluminium) recovery image
 installable on generic x86_64 UEFI PCs, by *converting* Google's official image locally instead
 of redistributing a ported one (same idea as Project Croissant / chromefy for ChromeOS).
 
-> Status: **experimental** — boots to a usable Googlebook OS desktop on real hardware (Arrow Lake
-> laptop, from USB, "safe display" GRUB entry): Wi-Fi, USB input, Play Store / app installs work;
-> no sound or touchpad yet. Needs an Alder Lake-or-newer CPU. See [`docs/`](docs/).
+> Status: **experimental** — boots to a usable Googlebook OS desktop on real hardware from USB:
+> Arrow Lake laptop (Intel iGPU or NVIDIA via nouveau; Wi-Fi, audio, touchpad, Play Store / app
+> installs), and older machines down to Haswell (Tiger Lake, Broadwell, Haswell) through
+> an in-kernel emulator for the newer CPU instructions the image is compiled for — slower there.
+> CPU floor: Haswell (AVX2). See [`docs/`](docs/) and the hardware matrix in docs/05.
 
 ## Quick start
 
@@ -48,10 +50,10 @@ Install to a disk from any Linux live session: `sudo ./churro.sh install churro.
    Churro builds the initrd a boot-v4 bootloader would (vendor + dlkm + generic ramdisks + extra
    modules + Android *bootconfig*) and installs GRUB + kernel there. `androidboot.boot_part_uuid`
    lets Android find its partitions on whatever disk it booted from.
-2. **Kernel**: the image's GKI kernel works for Intel Gen12+ machines. For everything else Churro
-   rebuilds **the very same kernel** from Google's public source (same commit, config, toolchain,
-   release string and kABI CRCs — the image's own modules still load) without KMI trimming and with
-   extra drivers: i915 (older Intel), simpledrm (any UEFI framebuffer), AHCI, virtio, vgem, and a
+2. **Kernel**: Churro rebuilds **the very same kernel** as the image's GKI from Google's public
+   source (same commit, config, toolchain, release string and kABI CRCs — the image's own modules
+   still load), picked automatically from the image, without KMI trimming, with small fixes in
+   `kmod/patches/` and extra drivers: i915 (older Intel), simpledrm (any UEFI framebuffer), AHCI, virtio, vgem, and a
    distro-like module set (Arch Linux's driver modules, ~3000) that `features/drivers-extra`
    adds to vendor_dlkm after an ABI check; Android loads them by device ID, like udev.
    `features/firmware-extra` adds their firmware (linux-firmware, Intel SOF audio, regulatory.db);
@@ -59,21 +61,30 @@ Install to a disk from any Linux live session: `sudo ./churro.sh install churro.
    Lenovo board's.
    Updating them: checklist in docs/03, "Updating the driver set and firmware"; for a newer
    recovery image or another Googlebook's image: docs/03, "Moving to a newer recovery image".
+   **Older CPUs**: the image's userspace is compiled for Panther Lake, so CPUs older than Arrow
+   Lake hit instructions they lack (AVX-VNNI, AVX-IFMA, GFNI, SHA-NI, VAES, ADX, ...). The kernel
+   patch `vex-emulate` emulates them on the invalid-instruction trap (dormant on CPUs that have
+   them; `churro.vexemu=0` turns it off) — docs/05, "Hard floor: the CPU".
 3. **Security** (`features/security-software`): the Googlebook keystore runs in a Trusty VM that
    needs x86 pKVM + pvmfw DICE + the Google Security Chip. Churro swaps in AOSP's software KeyMint
-   (taken from Google's public Android 17 emulator image) and removes the Trusty/GSC HALs — the
+   and Gatekeeper (lock-screen PIN/password; both from Google's public Android 17 emulator image)
+   and removes the Trusty/GSC HALs and services that only work on Google's hardware — the
    counterpart of Croissant's TPM emulator.
 4. **Graphics** (`features/gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`): Mesa built from source with
    the NDK (iris, crocus, nouveau, Zink, virgl, softpipe; NVK always, hasvk/radv optional), the
    allocator rebuilt for any Intel Xe GPU and nouveau, nouveau + NVIDIA firmware for machines
    without an iGPU; the stack is picked at boot (`androidboot.churro.gfx=`).
    **Crypto** (`features/crypto-generic`): BoringSSL rebuilt from source for any Haswell+ CPU
-   (Google's build assumes Panther Lake crypto instructions), exports checked against the image.
+   (Google's build assumes Panther Lake crypto instructions), exports checked against the image:
+   system + vendor copies replaced, the APEX copies (Conscrypt, HttpEngine, Wi-Fi, ...) covered by
+   bind mounts at boot, so the signed APEXes stay untouched.
 5. **Partitions** are patched by unpacking/repacking EROFS with SELinux labels preserved; dm-verity
    is switched off (`vbmeta` flags, device reported as unlocked/orange).
 
 Nothing Google-owned is shipped: inputs are the user's recovery image plus files the script
-downloads from Google's public servers (GKI source/toolchains, emulator image) or builds from source.
+downloads from public servers (Google's GKI source/toolchains, emulator image and BoringSSL;
+Mesa, linux-firmware, Arch's kernel config, ...; versions pinned in `versions.env`) or builds
+from source.
 
 ## Layout
 
@@ -82,9 +93,9 @@ downloads from Google's public servers (GKI source/toolchains, emulator image) o
 | `churro.sh` | `auto` / `build` / `install` |
 | `versions.env` | every pinned version the build downloads (kernel driver config, firmware, Mesa, NDK, emulator image, BoringSSL, tools), one section each |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
-| `features/` | partition overlays + patch scripts (`security-software`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `security-trusty-vm`) |
-| `crypto/` | BoringSSL build for Android (`build-boringssl.sh`) |
-| `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`), out-of-tree pack builds |
+| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `debug-log` (all default), `security-trusty-vm` (experimental) |
+| `crypto/` | BoringSSL builds for Android (`build-boringssl.sh` platform copy, `build-boringssl-httpengine.sh` HttpEngine's) |
+| `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`, `patches/` incl. the `vex-emulate` instruction emulator), out-of-tree pack builds |
 | `gfx/` | Mesa and minigbm (graphics allocator) builds for Android |
-| `tools/` | `prepare.sh` (fetch + build everything), module packs, QEMU helpers, dev helpers |
+| `tools/` | `prepare.sh` (fetch + build everything), module packs, QEMU helpers, `vexemu/` + `vextest/` (emulator source and tests), dev helpers |
 | `docs/` | analysis, bring-up log, architecture, device notes; `docs/notes/` = scratch |
