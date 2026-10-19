@@ -4,7 +4,9 @@
 #   tools/vextest/run.sh native         run on this machine native-only (ground truth check)
 #   tools/vextest/run.sh qemu <bzImage> [emulator-mode]
 #       boot a bare initramfs on <bzImage> under TCG with a gap CPU; modes:
-#       emu  = "-cpu max,-avx-vnni,-avx-ifma,-vaes,-sha-ni churro.vexemu=1":  emulated cases -> PASS
+#       emu  = "-cpu max,-avx-vnni,-avx-ifma,-vaes,-vpclmulqdq,-sha-ni churro.vexemu=1":  emulated
+#              cases -> PASS (VAES/VPCLMULQDQ via the native AES-NI/PCLMULQDQ fast path)
+#       emu-c = emu without AES-NI/PCLMULQDQ: the same cases through the C fallback
 #       off  = same CPU + "churro.vexemu=0":                      init must die with SIGILL
 #       max  = "-cpu max" (TCG's native mix; VNNI emulated or native depending on QEMU)
 set -euo pipefail
@@ -34,8 +36,9 @@ qemu)
   [ -x "$B" ] || do_build
   BZ=$2; MODE=${3:-emu}
   case $MODE in
-    emu) CPU='max,-avx-vnni,-avx-ifma,-vaes,-sha-ni'; EX='churro.vexemu=1' ;;
-    off) CPU='max,-avx-vnni,-avx-ifma,-vaes,-sha-ni'; EX='churro.vexemu=0' ;;
+    emu) CPU='max,-avx-vnni,-avx-ifma,-vaes,-vpclmulqdq,-sha-ni'; EX='churro.vexemu=1' ;;
+    emu-c) CPU='max,-avx-vnni,-avx-ifma,-vaes,-vpclmulqdq,-sha-ni,-aes,-pclmulqdq'; EX='churro.vexemu=1' ;;
+    off) CPU='max,-avx-vnni,-avx-ifma,-vaes,-vpclmulqdq,-sha-ni'; EX='churro.vexemu=0' ;;
     max) CPU='max'; EX='churro.vexemu=1' ;;
     *) echo "unknown mode $MODE" >&2; exit 1 ;;
   esac

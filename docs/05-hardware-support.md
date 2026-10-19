@@ -86,6 +86,14 @@ confirmed against native silicon), writes back, and advances RIP. Per-opcode rat
 trap counters in dmesg are the hotness gauge for a later offline rewriter. Default on;
 `churro.vexemu=0` in bootconfig restores the plain SIGILL. Dormant on CPUs with the native
 forms (handler only fires on `#UD`).
+**Native AES/CLMUL fast path.** 256-bit `vaesenc`/`vaesenclast`/`vaesdec`/`vaesdeclast` and
+`vpclmulqdq` are the 128-bit AES-NI / PCLMULQDQ instruction once per lane; on any CPU that has
+those (`X86_FEATURE_AES` / `X86_FEATURE_PCLMULQDQ`: Intel Westmere+, AMD Bulldozer+) the emulator
+runs them natively on its operand copies (inside the handler's `fpregs_lock()` window, where the
+task's FPU state is saved and reloaded and no other kernel FPU user can run), else the C model
+(S-box + GF(2^8) MixColumns, bitwise carryless multiply). The trap itself still costs; this cuts
+the per-instruction work, which on the T300FA throttled TLS downloads (AES-GCM) to ~270 KB/s.
+vextest: `emu` exercises the fast path, `emu-c` (no AES-NI/PCLMULQDQ) the C fallback.
 Perf note: GFNI also lives in libyuv hot loops (Tier 2, ~271 files) — emulation there is
 correct but slow; a real perf-cost class remains for Haswell → Comet Lake / Zen 1–3.
 Validation: `tools/vextest` (hand-encoded register/SIB/RIP-relative/imm cases vs scalar

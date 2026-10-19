@@ -482,11 +482,37 @@ static void churro_vex_gfni(u8 *d, const u8 *a, const u8 *b, int len, int op,
 	}
 }
 
+/*
+ * Native fast path for VAES/VPCLMULQDQ: the 256-bit forms are the 128-bit AES-NI/PCLMULQDQ
+ * instruction once per lane, and those run natively on any CPU that has them (Intel since
+ * Westmere, AMD since Bulldozer); without them the C code below is used. Only called from
+ * handle_vex_ud() between save_fpregs_to_fpstate() and restore_fpregs_from_fpstate() under
+ * fpregs_lock(): the task's registers are saved and fully reloaded around it, and no other
+ * kernel FPU user can run meanwhile (irq_fpu_usable() is false while softirqs are disabled),
+ * so xmm0/xmm1 are scratch. The kernel is built without SSE: the compiler never uses them.
+ */
+#define CHURRO_XMM_OP2(insn, d, a, b)					\
+	asm volatile("movdqu %1, %%xmm0\n\t"				\
+		     "movdqu %2, %%xmm1\n\t"				\
+		     insn " %%xmm1, %%xmm0\n\t"				\
+		     "movdqu %%xmm0, %0"				\
+		     : "=m" (*(u8 (*)[16])(d))				\
+		     : "m" (*(const u8 (*)[16])(a)), "m" (*(const u8 (*)[16])(b)))
+
 /* vpclmulqdq: per 128-bit lane, imm8[0] picks a's qword, imm8[4] b's; 128-bit carryless product */
 static void churro_pclmul_exec(u64 *d, const u64 *a, const u64 *b, int lanes, u8 imm)
 {
 	int i, j;
 
+	if (boot_cpu_has(X86_FEATURE_PCLMULQDQ)) {
+		for (i = 0; i < lanes; i++) {
+			u64 x[2] = { a[2 * i + (imm & 1)], 0 };
+			u64 y[2] = { b[2 * i + ((imm >> 4) & 1)], 0 };
+
+			CHURRO_XMM_OP2("pclmulqdq $0,", &d[2 * i], x, y);
+		}
+		return;
+	}
 	for (i = 0; i < lanes; i++) {
 		u64 x = a[2 * i + (imm & 1)];
 		u64 y = b[2 * i + ((imm >> 4) & 1)];
@@ -529,7 +555,7 @@ static int __init churro_aes_init(void)
 }
 core_initcall(churro_aes_init);
 
-/* ponytail: churro_gf_mul per MixColumns byte; xtime tables if vaesenc ever dominates the trap cost */
+/* ponytail: churro_gf_mul per MixColumns byte (only the fallback for CPUs without AES-NI) */
 static void churro_vex_aes(u8 *d, const u8 *st, const u8 *key, int lanes, int op)
 {
 	static const u8 mix[2][4] = { { 2, 3, 1, 1 }, { 14, 11, 13, 9 } };
@@ -537,6 +563,24 @@ static void churro_vex_aes(u8 *d, const u8 *st, const u8 *key, int lanes, int op
 	bool last = op == CHURRO_VAESENCLAST || op == CHURRO_VAESDECLAST;
 	int l, c, r, k;
 
+	if (boot_cpu_has(X86_FEATURE_AES)) {
+		for (l = 0; l < lanes; l++, d += 16, st += 16, key += 16)
+			switch (op) {
+			case CHURRO_VAESENC:
+				CHURRO_XMM_OP2("aesenc", d, st, key);
+				break;
+			case CHURRO_VAESENCLAST:
+				CHURRO_XMM_OP2("aesenclast", d, st, key);
+				break;
+			case CHURRO_VAESDEC:
+				CHURRO_XMM_OP2("aesdec", d, st, key);
+				break;
+			default:
+				CHURRO_XMM_OP2("aesdeclast", d, st, key);
+				break;
+			}
+		return;
+	}
 	for (l = 0; l < lanes; l++, d += 16, st += 16, key += 16) {
 		u8 t[16];
 
