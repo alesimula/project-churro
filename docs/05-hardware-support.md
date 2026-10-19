@@ -31,7 +31,8 @@ and `libinput`. An ELF scan of the image (~3100 files) found baked in everywhere
 **AVX-IFMA VEX** — emitted by the Rust float formatter (`zmij`), so it lands in libinput,
 libinputflinger and other core libs. All Intel Googlebook images share this one build (the other two
 targets are ARM/Snapdragon). A CPU missing any of these faults with `#UD` in a core process → panic.
-SHA-NI/VAES are mostly BoringSSL (runtime-dispatched, safe) and the AVX-512 EVEX hits are dispatched.
+SHA-NI/VAES/VPCLMULQDQ/ADX are mostly BoringSSL, whose CPUID checks `-march=pantherlake` turns into
+compile-time "yes" (rebuilt by `crypto-generic`, below); the AVX-512 EVEX hits are dispatched.
 
 **This corrects the earlier "12th gen (Alder Lake) is fine": AVX-IFMA VEX is missing on
 Alder/Raptor/Meteor Lake too**, so the true native floor is ~Arrow Lake / Lunar Lake / Panther Lake
@@ -124,6 +125,22 @@ Caveats: (a) QEMU TCG itself miscomputes chained ymm accumulators even without e
 only used for unit tests, not as a correctness reference; (b) real-device (Tiger Lake)
 validation is one boot sample reaching the setup UI, with GMS/ART dex issue still open —
 see `boot.log` high `vpdpwssd` trap counts; performance on trap-heavy processes is limited.
+
+**BoringSSL rebuilt (`crypto-generic`, phase 1: system + vendor).** BoringSSL picks its SHA-NI,
+VAES, VPCLMULQDQ, ADX, ... code paths with `CRYPTO_is_*_capable()` (`crypto/internal.h`): CPUID at
+run time, unless the compiler flags already promise the feature. Google's `-march=pantherlake`
+promises all of them, so the image's libcrypto runs them unconditionally and old CPUs trap on
+every SHA-256 / AES-GCM / RSA (the bulk of the T300FA and G20AJ trap counts: FIPS integrity check
+in every process, TLS, `odsign`). `crypto/build-boringssl.sh` builds the same upstream source
+(the version pinned by the image's exports, see the script) with Android's options (FIPS shared
+module + integrity hash, `OPENSSL_SMALL`, `BORINGSSL_ANDROID_SYSTEM`, static hidden libc++,
+`-Bsymbolic`) but `-march=x86-64-v3`: CPUID checks are real again, so Arrow Lake keeps every fast
+path and Haswell/Broadwell run plain AES-NI/SSSE3/AVX2 code natively. Installed over
+`/system/lib64` and `/vendor/lib64` `libcrypto.so` + `libssl.so` only if the exported dynamic
+symbols (names, types, binding, data sizes) equal the image's. The emulator (incl. the AES/CLMUL
+fast path) stays for everything else. Not covered yet (phase 2): the copies inside signed APEXes
+(Conscrypt = Java TLS, Cronet/Tethering), which still trap.
+
 brunch (docs/06) does none of this: it selects a prebuilt image per CPU family and declares
 older CPUs unsupported.
 

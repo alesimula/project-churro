@@ -201,6 +201,16 @@ files get a sibling's label or an explicit one.
   gralloc0 module stay and load our libraries: they're linked against the image's own libc++
   (platform `std::__1` ABI) and the build refuses to install them unless every symbol the image's
   binaries take from Google's versions is present. Written in place (labels kept).
+* `crypto-generic` (default) — BoringSSL (`libcrypto.so`, `libssl.so` in `/system/lib64` and
+  `/vendor/lib64`) rebuilt by `crypto/build-boringssl.sh` from the upstream commit the image's
+  exports pin, with Android's build options but `-march=x86-64-v3` instead of `pantherlake`, so
+  its CPUID dispatch works on Haswell+ (docs/05, "BoringSSL rebuilt"). Needs the NDK (from
+  `prepare.sh`) and downloads the source + a pinned Go (checksummed; only runs the FIPS hash
+  injector). libc++ is static and hidden, compiled in the platform `std::__1` namespace because
+  libcrypto exports two C++ helpers taking `std::atomic`. The build stops unless both libraries
+  export exactly the image's dynamic symbols. System is the first feature partition mounted at
+  `/` (`patch-system.sh`, files under `system/`). New recovery image: the gate tells whether
+  `REV` still matches. APEX copies (Conscrypt, ...) are not replaced.
 * NPU: `intel_vpu` is blacklisted unless `CHURRO_NPU=true` (top of `churro.sh`): the image only
   has Panther Lake NPU firmware and on Arrow Lake the failed probe froze the machine.
 * `debug-log` (default) — boot log to a file you can read from Windows. The "debug" GRUB entries

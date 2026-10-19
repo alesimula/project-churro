@@ -67,6 +67,8 @@ Install to a disk from any Linux live session: `sudo ./churro.sh install churro.
    the NDK (iris, crocus, nouveau, Zink, virgl, softpipe; NVK always, hasvk/radv optional), the
    allocator rebuilt for any Intel Xe GPU and nouveau, nouveau + NVIDIA firmware for machines
    without an iGPU; the stack is picked at boot (`androidboot.churro.gfx=`).
+   **Crypto** (`features/crypto-generic`): BoringSSL rebuilt from source for any Haswell+ CPU
+   (Google's build assumes Panther Lake crypto instructions), exports checked against the image.
 5. **Partitions** are patched by unpacking/repacking EROFS with SELinux labels preserved; dm-verity
    is switched off (`vbmeta` flags, device reported as unlocked/orange).
 
@@ -79,7 +81,8 @@ downloads from Google's public servers (GKI source/toolchains, emulator image) o
 |---|---|
 | `churro.sh` | `auto` / `build` / `install` |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
-| `features/` | partition overlays + patch scripts (`security-software`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `security-trusty-vm`) |
+| `features/` | partition overlays + patch scripts (`security-software`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `security-trusty-vm`) |
+| `crypto/` | BoringSSL build for Android (`build-boringssl.sh`) |
 | `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`), out-of-tree pack builds |
 | `gfx/` | Mesa and minigbm (graphics allocator) builds for Android |
 | `tools/` | `prepare.sh` (fetch + build everything), module packs, QEMU helpers, dev helpers |

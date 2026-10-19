@@ -94,7 +94,7 @@ cmd_build() {
   vendorboot_extract "$(part vendor_boot_a)" "$W/vboot"
   ls "$W/vboot"
 
-  local fdirs=() f p
+  local fdirs=() f p mp
   for f in ${feats//,/ }; do [ -d "$HERE/features/$f" ] || die "unknown feature: $f"; fdirs+=("$HERE/features/$f"); done
   if [ "$repack" = 1 ] && [ ${#fdirs[@]} -gt 0 ]; then
     log "applying features: $feats (dm-verity off)"
@@ -102,9 +102,10 @@ cmd_build() {
     export CHURRO_KERNEL=$kdir   # for features adding our kernel's modules (gpu-nouveau)
     export CHURRO_XE_IDS=$W/xe-ids   # drivers-extra: GPU IDs the image's xe binds -> boot menu
     # vendor_dlkm first: firmware-extra (a vendor feature) reads the module list from it
-    for p in vendor_dlkm vendor system_ext product odm; do
+    for p in vendor_dlkm vendor system system_ext product odm; do
+      mp=/$p; [ "$p" = system ] && mp=/   # system-as-root
       for f in "${fdirs[@]}"; do
-        if [ -d "$f/$p" ] || [ -f "$f/patch-$p.sh" ]; then erofs_repack "$(part super)" "${p}_a" "/$p" "${fdirs[@]}"; break; fi
+        if [ -d "$f/$p" ] || [ -f "$f/patch-$p.sh" ]; then erofs_repack "$(part super)" "${p}_a" "$mp" "${fdirs[@]}"; break; fi
       done
     done
   fi
@@ -253,7 +254,7 @@ cmd_auto() {
     [ "$p" != i915 ] || die "the i915 pack is retired (it broke xe on Gen12+): i915 now comes with drivers-extra and only loads on Intel GPUs xe doesn't drive"
     [ -d "$CHURRO_PACK_DIR/$p" ] || die "no module pack '$p' in $CHURRO_PACK_DIR"; margs+=(--modules "$CHURRO_PACK_DIR/$p"); done
   [ "$gfx" = auto ] || CHURRO_EXTRA_ARGS="androidboot.churro.gfx=$gfx ${CHURRO_EXTRA_ARGS:-}"
-  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,drivers-extra,audio-generic,debug-log$xfeat" "${margs[@]}"
+  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,drivers-extra,audio-generic,debug-log$xfeat" "${margs[@]}"
 }
 
 case ${1:-} in auto|build|install) deps_ensure ;; esac

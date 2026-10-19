@@ -41,6 +41,7 @@ selabel_like() {
 erofs_repack() {
   local super=$1 name=$2 mp=$3; shift 3
   local part=${mp#/} off size T src f
+  part=${part:-system}   # system is mounted at /: features use system/ and patch-system.sh
   read -r off size < <(python3 "$HERE/lib/lpinfo.py" "$super" "$name") || { echo "no LP partition $name" >&2; return 1; }
   T=$(mktemp -d /tmp/churro-repack.XXXX)
   src=$(losetup -f --show -r -o "$off" --sizelimit "$size" "$super")
