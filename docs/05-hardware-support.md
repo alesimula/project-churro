@@ -153,11 +153,45 @@ fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup s
   `on post-fs-data`, which runs after init.rc's (apexd has activated everything, init is in the
   default mount namespace) and before zygote and the HALs, which inherit the mounts. The signed
   APEX files and their verification stay as Google shipped them; StrongBox KeyMint (disabled) is
-  left out.
+  left out. SELinux (enforcing) denied init `mounton` on these files (`system_lib_file`,
+  `system_file`, `vendor_file`): `crypto-generic`'s `patch-vendor.sh` adds exactly those three
+  allow rules to the vendor policy (compiled on-device).
 - **Phase 2b — `libcrypto_httpengine.so`.** One copy, in the Tethering APEX (HttpEngine = platform
   Cronet). A different BoringSSL: Cronet's bundled one (`external/cronet/stable/third_party/boringssl`,
   Chromium's version pin), 324 exports with `@@INTERSECTED_SYMBOLS` versions (vs. 2695). Needs its
   own version search, build options and export gate; installed with a bind mount as in 2a. To do.
+  Expected gain unknown: on the G20AJ, TLS-style traps (`vaesenc`/`vaesenclast`/`vpclmulqdq`) were
+  ~25 % of all traps in 20 min (361 M of 1.43 billion), mostly `CronetNet` and `dl.google.com`
+  threads (Play/GMS downloads), but the trap log names the thread, not the library: that could be
+  HttpEngine, the Cronet GMS bundles itself (not replaceable), or Conscrypt (2a). To decide
+  first: add the faulting address's mapped file (VMA file name) to the emulator's ratelimited trap
+  line, which also locates the `vpdpwssd` hot spots below.
+
+**To do: `vpdpwssd` (AVX-VNNI) cost.** Biggest non-crypto trap source on gap CPUs (G20AJ: 226 M
+in 15 min; VivoBook: 136 M per boot), compiler-generated across ~108 files (Skia/HWUI/RenderEngine
+`TextureLoadThread`, app RenderThreads, ART Profile Saver/dex2oat): not rebuildable like
+BoringSSL. First step: find the hot libraries/functions. Today's trap lines only name the
+thread, so add the mapped file + offset of the faulting address to them (see 2b), then
+disassemble the hot spots as was done for ADX. Options, smallest first:
+1. Native fast path: `vpdpwssd` = `vpmaddwd` + `vpaddd` (AVX2, Haswell+), run on the operand copies
+   like the AES/CLMUL fast path. Small gain: the C model is already cheap; trap entry + xsave
+   dominate.
+2. Run-ahead for VNNI loops (like SHA's): after a trap keep interpreting the straight-line AVX2
+   code that follows (ymm loads, `vpmovzx*`, `vpshufb`, `vpaddd`, more `vpdpwssd`). Big gain if the
+   hot loops are dense (SHA: 56 → 2 traps per block); needs VEX decoding + ymm state in
+   `churro_ra_step`, and a differential test like the SHA/ADX ones.
+3. Offline patching of the hottest call sites (replacement needs a scratch register and more bytes
+   than the original → trampolines). Removes the traps; riskiest.
+1 + 2 together (the plan): run-ahead interprets the loop, and every `vpdpwssd` in it (and the
+other AVX2 ops: `vpaddd`, `vpshufb`, loads) runs natively on the register copies inside the
+handler's `fpregs_lock()` window, as the AES/CLMUL fast path already does. Run-ahead cuts the
+traps, the native ops make each interpreted instruction cheap. AVX2 is the image's own floor, so
+the native path is always available; the C model stays for the tests (`emu-c`-style mode). New
+over SHA's run-ahead: full 256-bit ymm copies and VEX decoding.
+Other machines: 1 and 2 live in the `#UD` handler, so CPUs with AVX-VNNI (Alder Lake+, Zen 5, the
+MSI) never run them. 3 changes binaries for everyone: it would need patched copies applied only on
+CPUs without AVX-VNNI (e.g. bind-mounted at boot after a CPUID check), or a replacement sequence
+that is correct and cheap everywhere.
 
 Not fixable this way: BoringSSL bundled inside apps (e.g. GMS's own Cronet, if that's what
 `CronetNet` threads use); the emulator keeps handling those.
