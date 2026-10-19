@@ -18,7 +18,9 @@ die() { echo "churro: $*" >&2; exit 1; }
 log() { echo ">> $*"; }
 need() { for c in "$@"; do command -v "$c" >/dev/null || die "missing tool: $c"; done; }
 
-LOOP=""; cleanup() { [ -n "$LOOP" ] && losetup -d "$LOOP" 2>/dev/null || true; }
+# TMPDIRS: work dirs under /tmp (build, repack), removed also when a step fails
+LOOP="" TMPDIRS=""
+cleanup() { [ -n "$LOOP" ] && losetup -d "$LOOP" 2>/dev/null; [ -z "$TMPDIRS" ] || rm -rf --one-file-system $TMPDIRS; true; }
 trap cleanup EXIT
 
 # Partition by GPT label (labels are stable across Googlebook images, numbers might not be).
@@ -86,7 +88,7 @@ cmd_build() {
       truncate -s +$(((dsize << 30) - cur)) "$out"; grow_userdata "$out"; fi
   fi
   LOOP=$(losetup -f --show -P "$out"); udevadm settle 2>/dev/null || sleep 1
-  local W; W=$(mktemp -d /tmp/churro.XXXX)
+  local W; W=$(mktemp -d /tmp/churro.XXXX); TMPDIRS="$TMPDIRS $W"
 
   log "extracting boot images (slot _a)"
   bootimg_extract "$(part boot_a)" "$W/boot"

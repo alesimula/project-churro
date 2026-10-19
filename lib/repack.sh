@@ -44,7 +44,7 @@ erofs_repack() {
   local part=${mp#/} off size T src f
   part=${part:-system}   # system is mounted at /: features use system/ and patch-system.sh
   read -r off size < <(python3 "$HERE/lib/lpinfo.py" "$super" "$name") || { echo "no LP partition $name" >&2; return 1; }
-  T=$(mktemp -d /tmp/churro-repack.XXXX)
+  T=$(mktemp -d /tmp/churro-repack.XXXX); TMPDIRS="${TMPDIRS:-} $T"   # churro.sh's exit cleanup
   src=$(losetup -f --show -r -o "$off" --sizelimit "$size" "$super")
   "$EROFS_BIN/fsck.erofs" --extract="$T/root" --xattrs --preserve "$src" >/dev/null
   local uuid; uuid=$("$EROFS_BIN/dump.erofs" "$src" | awk '/UUID/ {print $NF}')

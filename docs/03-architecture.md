@@ -219,7 +219,11 @@ files get a sibling's label or an explicit one.
   `REV` still matches. The 11 APEX copies of the same libraries (Conscrypt, Tethering, Wi-Fi,
   Bluetooth, ...) are covered by bind mounts at boot (`churro-apex-crypto.rc`), not
   by repacking the signed APEXes; three vendor-policy rules let init `mounton` files labelled
-  `system_lib_file`/`system_file`/`vendor_file` (denied otherwise; SELinux stays enforcing). Not covered: Tethering's `libcrypto_httpengine.so` (Cronet's own BoringSSL).
+  `system_lib_file`/`system_file`/`vendor_file` (denied otherwise; SELinux stays enforcing). Tethering's `libcrypto_httpengine.so` (HttpEngine = platform Cronet, its own BoringSSL at the
+  commit its Chromium version pins) is rebuilt by `crypto/build-boringssl-httpengine.sh` (from
+  `patch-system.sh`, exports must equal the image's exactly) and bind-mounted the same way.
+  Risk: a Google Play system update replacing one of these APEXes with a newer version would get
+  our older library mounted over its copy (see docs/05 "Known gaps").
 * NPU: `intel_vpu` is blacklisted unless `CHURRO_NPU=true` (top of `churro.sh`): the image only
   has Panther Lake NPU firmware and on Arrow Lake the failed probe froze the machine.
 * `debug-log` (default) — boot log to a file you can read from Windows. The "debug" GRUB entries

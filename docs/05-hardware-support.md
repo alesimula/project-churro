@@ -159,8 +159,21 @@ fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup s
 - **Phase 2b — `libcrypto_httpengine.so`.** One copy, in the Tethering APEX (HttpEngine = platform
   Cronet). A different BoringSSL: Cronet's bundled one (`external/cronet/stable/third_party/boringssl`,
   Chromium's version pin), 324 exports with `@@INTERSECTED_SYMBOLS` versions (vs. 2695). Needs its
-  own version search, build options and export gate; installed with a bind mount as in 2a. To do.
-  Expected gain unknown: on the G20AJ, TLS-style traps (`vaesenc`/`vaesenclast`/`vpclmulqdq`) were
+  own version search, build options and export gate; installed with a bind mount as in 2a.
+  **Built** (`crypto/build-boringssl-httpengine.sh`, from `patch-system.sh`): the image's
+  `libhttpengine.so` is Chromium 150.0.7871.41, whose DEPS pins BoringSSL `3a9254f16`
+  (`BORINGSSL_HTTPENGINE_REV`). Must be that exact commit: the 323 exports include internal C++
+  helpers (`bssl::Mutex`, `spake2plus::Prover`, `OPENSSL_lh_*`, refcounts on `std::__Cr::atomic`)
+  whose layouts libhttpengine was compiled against. Built like AOSP does: static libcrypto with
+  default visibility, linked into a shared object exporting exactly the image's symbols under
+  `INTERSECTED_SYMBOLS` (version script generated from the image's library), compiled in
+  Chromium's libc++ namespace `std::__Cr` with the NDK's static libc++ kept local
+  (+ a `__libcpp_verbose_abort` → abort shim); `OPENSSL_SMALL` like Chromium on Android; not FIPS.
+  Installed as `/system/lib64/libcrypto_httpengine.so`, bind-mounted over the APEX's copy.
+  Why it matters (G20AJ after 2a): the remaining 488 M AES-GCM traps (60 %) are 256-bit VAES in
+  `CronetNet` threads, which only a Panther-Lake-compiled copy executes on Haswell; the
+  app-bundled Cronets (GMS CronetDynamite, Play Store's libcronet) dispatch by CPUID.
+  Earlier estimate: on the G20AJ, TLS-style traps (`vaesenc`/`vaesenclast`/`vpclmulqdq`) were
   ~25 % of all traps in 20 min (361 M of 1.43 billion), mostly `CronetNet` and `dl.google.com`
   threads (Play/GMS downloads), but the trap log names the thread, not the library: that could be
   HttpEngine, the Cronet GMS bundles itself (not replaceable), or Conscrypt (2a). To decide
@@ -170,9 +183,9 @@ fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup s
 **To do: `vpdpwssd` (AVX-VNNI) cost.** Biggest non-crypto trap source on gap CPUs (G20AJ: 226 M
 in 15 min; VivoBook: 136 M per boot), compiler-generated across ~108 files (Skia/HWUI/RenderEngine
 `TextureLoadThread`, app RenderThreads, ART Profile Saver/dex2oat): not rebuildable like
-BoringSSL. First step: find the hot libraries/functions. Today's trap lines only name the
-thread, so add the mapped file + offset of the faulting address to them (see 2b), then
-disassemble the hot spots as was done for ADX. Options, smallest first:
+BoringSSL. First step: find the hot libraries/functions: the ratelimited trap lines now end in
+`@ <file>(<fs id>)+0x<file offset>` (vexemu `churro_where()`; the fs id tells a bind-mounted copy
+from the APEX original), then disassemble the hot spots as was done for ADX. Options, smallest first:
 1. Native fast path: `vpdpwssd` = `vpmaddwd` + `vpaddd` (AVX2, Haswell+), run on the operand copies
    like the AES/CLMUL fast path. Small gain: the C model is already cheap; trap entry + xsave
    dominate.
@@ -261,6 +274,25 @@ adding a second value after it.
 | Security chip | not needed (`security-software`) | — |
 
 ## Known gaps (to implement)
+
+**APEX updates vs. the BoringSSL bind mounts** (`churro-apex-crypto.rc`). The mounts target
+`/apex/<name>/lib64/...`, i.e. whatever version of the module is active. If a Google Play system
+update installs a newer Conscrypt/Tethering/Wi-Fi/... APEX, our library (built for the image's
+version) is mounted over the updated module's copy: missing exports make that module fail to
+load, a changed internal layout (httpengine) crashes its users — zygote preloads libhttpengine.
+Not seen yet. Fix before relying on it: mount only over the factory version (e.g. a small
+helper that checks `/apex/apex-info-list.xml` `isFactory` before mounting), or block mainline
+APEX updates together with `update_engine` (Open item "OTA updater").
+
+**Video frames on nouveau GL (G20AJ, GM204): EGLImage import fails.** Firefox plays videos
+black (its GPU process: `error creating EGLImage: 0x3000`); Reddit aborts after a while in HWUI
+(`skia: Could not create EGL image, err = (0x3000)` → `AutoBackendTextureRelease.cpp Invalid
+GrBackendTexture` → SIGABRT in RenderThread). Around them the software H.264 decoder logs
+`C2SoftAvcDec: fetchGraphicBlock for Output failed`. Likely cause: video-decoder output buffers
+(YUV, from our minigbm nouveau backend) that Mesa's nouveau GL can't import as EGLImages, or that
+minigbm can't allocate for that usage. To check: which format/usage the failing buffers have
+(gralloc logs), whether minigbm's nouveau backend lists YUV formats, and Mesa nouveau's
+`EGL_ANDROID_image_native_buffer` path; compare with NVK/Zink on Turing+.
 
 **Audio** (`features/audio-generic`, docs/03). Covered today: HD-audio codecs on legacy
 `snd_hda_intel` (`PCH`, `Generic`/`Generic_1`, `Intel`) and on SOF's generic HDA machine

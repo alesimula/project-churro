@@ -344,6 +344,25 @@ __setup("churro.vexemu=", churro_vexemu_setup);
 static atomic64_t churro_vexemu_count[CHURRO_NR_OPS];
 static DEFINE_RATELIMIT_STATE(churro_vexemu_rs, DEFAULT_RATELIMIT_INTERVAL,
 			      DEFAULT_RATELIMIT_BURST);
+
+/* For the ratelimited trap line: " @ <file>(<fs id>)+0x<file offset>" of the trapping address,
+ * so the hot library is known (the fs id tells a bind-mounted copy from the original). */
+static void churro_where(unsigned long ip, char *buf, size_t n)
+{
+	struct mm_struct *mm = current->mm;
+	struct vm_area_struct *vma;
+
+	buf[0] = 0;
+	if (!mm || !mmap_read_trylock(mm))
+		return;
+	vma = vma_lookup(mm, ip);
+	if (vma && vma->vm_file)
+		snprintf(buf, n, " @ %s(%s)+0x%lx", file_dentry(vma->vm_file)->d_name.name,
+			 file_inode(vma->vm_file)->i_sb->s_id,
+			 ip - vma->vm_start + (vma->vm_pgoff << PAGE_SHIFT));
+	mmap_read_unlock(mm);
+}
+
 static const char * const churro_vexemu_names[] = {
 	"vpdpbusd", "vpdpbusds", "vpdpwssd", "vpdpwssds",
 	"vpmadd52luq", "vpmadd52huq",
@@ -1029,10 +1048,14 @@ static bool handle_adx_ud(struct pt_regs *regs)
 
 	regs->ip += insn.length;
 	atomic64_inc(&churro_vexemu_count[op]);
-	if (__ratelimit(&churro_vexemu_rs))
-		pr_info("churro-vexemu: %s in %s[%d], trap #%lld\n",
-			churro_vexemu_names[op], current->comm, task_pid_nr(current),
+	if (__ratelimit(&churro_vexemu_rs)) {
+		char where[96];
+
+		churro_where(regs->ip - insn.length, where, sizeof(where));
+		pr_info("churro-vexemu: %s in %s[%d]%s, trap #%lld\n",
+			churro_vexemu_names[op], current->comm, task_pid_nr(current), where,
 			atomic64_read(&churro_vexemu_count[op]));
+	}
 	return true;
 }
 /* --- end ADX --- */
@@ -1042,6 +1065,7 @@ static bool handle_vex_ud(struct pt_regs *regs)
 {
 	u8 buf[MAX_INSN_SIZE];
 	u32 va[8], vb[8], vd[8], vacc[8], ra[16][4];
+	unsigned long tip;
 	struct insn insn;
 	struct fpu *fpu = x86_task_fpu(current);
 	struct xregs_state *xs;
@@ -1204,15 +1228,20 @@ static bool handle_vex_ud(struct pt_regs *regs)
 	restore_fpregs_from_fpstate(fpu->fpstate, XFEATURE_MASK_FPSTATE);
 	fpregs_unlock();
 
+	tip = regs->ip;		/* the trapping instruction (run-ahead moves ip on) */
 	regs->ip += insn.length;
 	if (legacy)
 		ran = churro_runahead(regs, ra);
 	atomic64_inc(&churro_vexemu_count[op]);
-	if (__ratelimit(&churro_vexemu_rs))
-		pr_info("churro-vexemu: %s in %s[%d], trap #%lld (+%d run-ahead, %lld total)\n",
-			churro_vexemu_names[op], current->comm, task_pid_nr(current),
+	if (__ratelimit(&churro_vexemu_rs)) {
+		char where[96];
+
+		churro_where(tip, where, sizeof(where));
+		pr_info("churro-vexemu: %s in %s[%d]%s, trap #%lld (+%d run-ahead, %lld total)\n",
+			churro_vexemu_names[op], current->comm, task_pid_nr(current), where,
 			atomic64_read(&churro_vexemu_count[op]), ran,
 			atomic64_read(&churro_runahead_count));
+	}
 	return true;
 }
 

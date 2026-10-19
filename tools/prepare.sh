@@ -73,6 +73,8 @@ bad=$(awk 'NR==FNR {crc[$2]=$1; next} ($2 in crc) && crc[$2] != $1 {n++; if (n<=
       "$C/vmlinux.symvers-$BID" "$S/common/out-kernel-$PROF/Module.symvers")
 log "kABI check: $bad of $(wc -l < "$C/vmlinux.symvers-$BID") GKI exports differ"
 [ "$bad" = 0 ] || { echo "kABI broken: the image's prebuilt modules won't load. Fix the profile ($PROF)." >&2; rm -rf "$K"; exit 1; }
+# superseded kernels of this image (one per profile/patch change, ~70-280 MB each): only $K is used
+for k in "$C/kernel-$PROF-$BID-"*; do [ "$k" = "$K" ] || rm -rf "$k"; done
 MD=$(ls -d "$K"/modroot/lib/modules/*/)
 P=$C/packs-$PROF-$BID; rm -rf "$P"
 # gpu: no i915 here. As a first-stage pack it loaded on every machine: it wedged Arrow Lake
