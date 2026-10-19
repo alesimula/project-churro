@@ -29,7 +29,8 @@ selabel_like() {
   local p=$1 dir ref lbl
   dir=$(dirname "$p")
   if [ -d "$p" ]; then ref=$dir
-  else ref=$(find "$dir" -maxdepth 1 -type f ! -path "$p" | head -1); ref=${ref:-$dir}; fi
+  # -quit, not `| head -1`: in a big dir find gets SIGPIPE, which pipefail turns into an exit
+  else ref=$(find "$dir" -maxdepth 1 -type f ! -path "$p" -print -quit); ref=${ref:-$dir}; fi
   lbl=$(getfattr --only-values -n security.selinux "$ref" 2>/dev/null | tr -d '\0') || true
   [ -n "$lbl" ] && setfattr -n security.selinux -v "$lbl" "$p"
   return 0

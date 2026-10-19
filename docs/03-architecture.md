@@ -210,7 +210,9 @@ files get a sibling's label or an explicit one.
   libcrypto exports two C++ helpers taking `std::atomic`. The build stops unless both libraries
   export exactly the image's dynamic symbols. System is the first feature partition mounted at
   `/` (`patch-system.sh`, files under `system/`). New recovery image: the gate tells whether
-  `REV` still matches. APEX copies (Conscrypt, ...) are not replaced.
+  `REV` still matches. The 11 APEX copies of the same libraries (Conscrypt, Tethering, Wi-Fi,
+  Bluetooth, ...) are covered by bind mounts at boot (`churro-apex-crypto.rc`), not by repacking
+  the signed APEXes. Not covered: Tethering's `libcrypto_httpengine.so` (Cronet's own BoringSSL).
 * NPU: `intel_vpu` is blacklisted unless `CHURRO_NPU=true` (top of `churro.sh`): the image only
   has Panther Lake NPU firmware and on Arrow Lake the failed probe froze the machine.
 * `debug-log` (default) — boot log to a file you can read from Windows. The "debug" GRUB entries

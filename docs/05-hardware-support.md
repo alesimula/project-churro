@@ -139,20 +139,24 @@ path and Haswell/Broadwell run plain AES-NI/SSSE3/AVX2 code natively. Installed 
 `/system/lib64` and `/vendor/lib64` `libcrypto.so` + `libssl.so` only if the exported dynamic
 symbols (names, types, binding, data sizes) equal the image's. The emulator (incl. the AES/CLMUL
 fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup screen 4:02 → 2:08
-(docs/02). Not covered yet: the copies inside signed APEXes, which still trap (Java crypto, TLS,
-Wi-Fi, Bluetooth):
+(docs/02). The copies inside signed APEXes (Java crypto, TLS, Wi-Fi, Bluetooth):
 
 - **Phase 2a — platform libcrypto/libssl in APEXes.** 11 APEXes carry their own copy, all with
   exactly the system library's exports, so the `crypto-generic` build drops in unchanged:
   Conscrypt (`libcrypto` + `libssl` + `boringssl_self_test64`), Tethering, Wi-Fi,
   ConfigInfrastructure (`libcrypto` + `libssl`), Bluetooth, adbd, OnDevicePersonalization
   (`libcrypto`); vendor: ClearKey DRM, crosfp fingerprint, StrongBox KeyMint (disabled; + `libssl`
-  for the last two). virt/compos only link to it. Work: unpack each APEX payload, replace, repack,
-  re-sign, and make the image accept our APEX key.
+  for the last two). virt/compos only link to it. **Done without touching the APEXes**:
+  `features/crypto-generic/system/system/etc/init/churro-apex-crypto.rc` bind-mounts our
+  `/system/lib64` (system APEXes) or `/vendor/lib64` (vendor APEXes) files over each copy in
+  `on post-fs-data`, which runs after init.rc's (apexd has activated everything, init is in the
+  default mount namespace) and before zygote and the HALs, which inherit the mounts. The signed
+  APEX files and their verification stay as Google shipped them; StrongBox KeyMint (disabled) is
+  left out.
 - **Phase 2b — `libcrypto_httpengine.so`.** One copy, in the Tethering APEX (HttpEngine = platform
   Cronet). A different BoringSSL: Cronet's bundled one (`external/cronet/stable/third_party/boringssl`,
   Chromium's version pin), 324 exports with `@@INTERSECTED_SYMBOLS` versions (vs. 2695). Needs its
-  own version search, build options and export gate; packaging as in 2a.
+  own version search, build options and export gate; installed with a bind mount as in 2a. To do.
 
 Not fixable this way: BoringSSL bundled inside apps (e.g. GMS's own Cronet, if that's what
 `CronetNet` threads use); the emulator keeps handling those.

@@ -1,0 +1,22 @@
+# Churro crypto-generic, phase 2a: the APEXes' own copies of the platform BoringSSL
+# (libcrypto.so / libssl.so, same exports as /system's) are replaced by ours with bind mounts,
+# so the signed APEX files stay untouched. init.rc's post-fs-data waits for apexd to activate
+# every APEX and enters the default mount namespace; this action runs after it, before
+# zygote, Wi-Fi, Bluetooth and the HALs start, which all inherit the mounts.
+# System APEXes take /system's copy (system_lib_file), vendor ones /vendor's (vendor_file).
+# A missing APEX only makes its mount fail (logged); the rest still apply.
+on post-fs-data
+    mount none /system/lib64/libcrypto.so /apex/com.android.conscrypt/lib64/libcrypto.so bind
+    mount none /system/lib64/libssl.so /apex/com.android.conscrypt/lib64/libssl.so bind
+    mount none /system/lib64/libcrypto.so /apex/com.android.tethering/lib64/libcrypto.so bind
+    mount none /system/lib64/libssl.so /apex/com.android.tethering/lib64/libssl.so bind
+    mount none /system/lib64/libcrypto.so /apex/com.android.wifi/lib64/libcrypto.so bind
+    mount none /system/lib64/libssl.so /apex/com.android.wifi/lib64/libssl.so bind
+    mount none /system/lib64/libcrypto.so /apex/com.android.configinfrastructure/lib64/libcrypto.so bind
+    mount none /system/lib64/libssl.so /apex/com.android.configinfrastructure/lib64/libssl.so bind
+    mount none /system/lib64/libcrypto.so /apex/com.android.bt/lib64/libcrypto.so bind
+    mount none /system/lib64/libcrypto.so /apex/com.android.adbd/lib64/libcrypto.so bind
+    mount none /system/lib64/libcrypto.so /apex/com.android.ondevicepersonalization/lib64/libcrypto.so bind
+    mount none /vendor/lib64/libcrypto.so /apex/com.android.hardware.drm.clearkey/lib64/libcrypto.so bind
+    mount none /vendor/lib64/libcrypto.so /apex/com.android.hardware.fingerprint.crosfp/lib64/libcrypto.so bind
+    mount none /vendor/lib64/libssl.so /apex/com.android.hardware.fingerprint.crosfp/lib64/libssl.so bind
