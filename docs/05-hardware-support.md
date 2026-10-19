@@ -48,16 +48,28 @@ second-stage `init` → panic.
 | Arrow/Lunar/Panther Lake, AMD Zen 5 | nothing | boots as-is (the MSI) |
 | Ice/Tiger/Rocket Lake, AMD Zen 4 | AVX-VNNI VEX + AVX-IFMA VEX (Zen 4: none) + SHA-NI (Ice/Tiger) | emulated in-kernel on `#UD` |
 | Alder/Raptor/Meteor Lake | AVX-IFMA VEX only (they have AVX-VNNI) | emulated (only the 2 IFMA ops trap) |
-| Haswell → Comet Lake, Zen 1–3 | + GFNI, SHA-NI, 256-bit VAES/VPCLMULQDQ (BoringSSL, compile-time on) | all 21 emulated; GFNI sits in hot loops (libyuv), VAES in AES-GCM → real perf cost |
+| Haswell → Comet Lake, Zen 1–3 | + GFNI, SHA-NI, 256-bit VAES/VPCLMULQDQ (BoringSSL, compile-time on); Haswell also ADX | all 23 emulated; GFNI sits in hot loops (libyuv), VAES in AES-GCM → real perf cost |
 | pre-Haswell; Atom without AVX | AVX2/BMI2, everywhere | not feasible |
 
 Plan (implemented): a kernel `#UD` handler (`kmod/patches/vex-emulate.patch`, built from
-`tools/vexemu/generate_traps.py`) emulates the 21 instructions userspace hits on a gap CPU:
+`tools/vexemu/generate_traps.py`) emulates the 23 instructions userspace hits on a gap CPU:
 AVX-VNNI `vpdpbusd(s)`/`vpdpwssd(s)`, AVX-IFMA `vpmadd52l/huq`, GFNI
 `gf2p8affine[inv]qb`/`gf2p8mulb`, VPCLMULQDQ (VEX 128/256), 256-bit VAES
 (`vaesenc/enclast/dec/declast` ymm), and the legacy-encoded SHA-NI set
 (`sha1rnds4/nexte/msg1/msg2`, `sha256rnds2/msg1/msg2`, incl. the REX forms for xmm8–15 that
-BoringSSL and liblzma use; legacy writes keep the upper YMM half).
+BoringSSL and liblzma use; legacy writes keep the upper YMM half), and ADX `adcx`/`adox`.
+
+**ADX (Haswell).** The ASUS G20AJ (i7-4790) stalled in boot: `odsign` died with SIGILL every
+5 s in `libcrypto.so` `bn_mulx4x_mont` (`adcx %rax,%r13`, reached from BoringSSL's lazy RSA
+self-test in `RSA_verify`), and `init.rc` waits on `odsign.key.done`. ADX came with Broadwell;
+the image has it in all libcrypto copies (358 sites each, RSA/ECC), Rust `ring` (520),
+`libjavacore` (263), `libhpke_jni`, audio effects and cros_ml. `handle_adx_ud()` runs before the
+VEX path and touches no FPU state (no xsave/xrstor): decodes `66|F3 [REX] 0F 38 F6 /r` (no
+prefix = WRSS, rejected), dest += src + carry with the carry from/to CF (`adcx`) or OF (`adox`)
+only, 32-bit forms zero-extended, register or memory source. Differential test vs. native ADX
+(kernel decoder + extracted code, 9,000 random programs / 540,000 ops: 0 mismatches; mutations
+of carry-in, 32-bit truncation, CF/OF choice, flag preservation and REX.B all caught) and
+vextest `adcx/*`, `adox/*`. No run-ahead for integer code yet: measure the trap counts first.
 
 **Run-ahead (SHA-NI cost).** First T300FA boot (Broadwell): 1.87 billion traps in 19 min, ~2.3 M/s
 sustained = the whole CPU; 93 % SHA-256, from processes like `cp`/`mv`/`log` (toybox links

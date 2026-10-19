@@ -19,7 +19,7 @@
  #include <asm/vm86.h>
  #include <asm/umip.h>
  #include <asm/insn.h>
-@@ -295,12 +300,849 @@
+@@ -295,12 +300,936 @@
  	do_error_trap(regs, 0, "overflow", X86_TRAP_OF, SIGSEGV, 0, NULL);
  }
  
@@ -33,8 +33,9 @@
 + * these unconditionally, but "Tier-1 gap" CPUs lack VNNI/IFMA-VEX (Ice Lake and
 + * Zen 4; Alder/Raptor/Meteor Lake) and older ones also GFNI, SHA-NI and VAES
 + * (Haswell..Comet Lake: BoringSSL's FIPS self-test in init runs vaesenc ymm),
-+ * so core boot binaries (incl. second-stage init) die with SIGILL and the
-+ * boot panics. This only runs on #UD, i.e. it is dormant on CPUs with the
++ * and Haswell also ADX (adcx/adox: BoringSSL's RSA/ECC, Rust ring), so core boot
++ * binaries (incl. second-stage init, odsign) die with SIGILL and the boot
++ * panics or stalls. This only runs on #UD, i.e. it is dormant on CPUs with the
 + * native forms. Per-opcode trap counts are logged (ratelimited) as the
 + * hotness gauge for a possible offline rewriter. churro.vexemu=0 in
 + * bootconfig disables it.
@@ -48,6 +49,7 @@
 +	CHURRO_SHA1RNDS4,
 +	CHURRO_PCLMULQDQ,
 +	CHURRO_VAESENC, CHURRO_VAESENCLAST, CHURRO_VAESDEC, CHURRO_VAESDECLAST,
++	CHURRO_ADCX, CHURRO_ADOX,	/* integer-only: handle_adx_ud(), never handle_vex_ud() */
 +	CHURRO_NR_OPS
 +};
 +
@@ -73,6 +75,7 @@
 +	"sha256rnds2", "sha256msg1", "sha256msg2", "sha1rnds4",
 +	"vpclmulqdq",
 +	"vaesenc", "vaesenclast", "vaesdec", "vaesdeclast",
++	"adcx", "adox",
 +};
 +
 +static inline s32 churro_sat_s32(s64 v)
@@ -673,6 +676,90 @@
 +}
 +/* --- end run-ahead --- */
 +
++/* --- ADX --- */
++/*
++ * adcx/adox (Broadwell+; Haswell lacks them): 66 [REX] 0F 38 F6 /r = adcx, F3 ... = adox.
++ * dest += src + carry-in, with the carry taken from and written back to CF (adcx) or OF
++ * (adox) only: no other flag changes. REX.W selects 64-bit, else 32-bit with the result
++ * zero-extended into the 64-bit register. Without a prefix the same bytes are WRSS (CET),
++ * which is not ours. Integer-only, so this runs before (and without) the xsave/xrstor path.
++ */
++static void churro_adx_exec(unsigned long *dst, unsigned long src, unsigned long *flags,
++			    bool adox, bool w)
++{
++	unsigned long flag = adox ? X86_EFLAGS_OF : X86_EFLAGS_CF, t, res;
++	bool cin = *flags & flag, c1, c2;
++
++	if (w) {
++		c1 = __builtin_add_overflow(*dst, src, &t);
++		c2 = __builtin_add_overflow(t, (unsigned long)cin, &res);
++	} else {
++		u64 s = (u64)(u32)*dst + (u32)src + cin;
++
++		res = (u32)s;
++		c1 = s >> 32;
++		c2 = false;
++	}
++	*dst = res;
++	*flags = (*flags & ~flag) | (c1 || c2 ? flag : 0);
++}
++
++/* returns true when the #UD was an adcx/adox (emulated) */
++static bool handle_adx_ud(struct pt_regs *regs)
++{
++	u8 buf[MAX_INSN_SIZE], pfx = 0, rex;
++	unsigned long *dst, src = 0;
++	struct insn insn;
++	insn_byte_t p;
++	int len, i, op, off;
++	void __user *ea;
++
++	if (!churro_vexemu)
++		return false;
++	len = MAX_INSN_SIZE - copy_from_user(buf, (void __user *)regs->ip, MAX_INSN_SIZE);
++	/* every accepted encoding starts with its 66/F3 prefix: skip the decode for the
++	 * VEX (C4/C5) and SHA-NI (0F/REX) traps that reach handle_vex_ud() next */
++	if (len < 5 || (buf[0] != 0x66 && buf[0] != 0xf3) ||
++	    insn_decode(&insn, buf, len, INSN_MODE_64) || insn.vex_prefix.nbytes ||
++	    insn.opcode.nbytes != 3 || insn.opcode.bytes[0] != 0x0f ||
++	    insn.opcode.bytes[1] != 0x38 || insn.opcode.bytes[2] != 0xf6)
++		return false;
++	for (i = 0; i < ARRAY_SIZE(insn.prefixes.bytes) && (p = insn.prefixes.bytes[i]); i++) {
++		if ((p != 0x66 && p != 0xf3) || pfx)
++			return false;
++		pfx = p;
++	}
++	if (!pfx)
++		return false;
++	op = pfx == 0x66 ? CHURRO_ADCX : CHURRO_ADOX;
++	rex = insn.rex_prefix.nbytes ? insn.rex_prefix.bytes[0] : 0;
++
++	dst = insn_get_modrm_reg_ptr(&insn, regs);
++	if (!dst)
++		return false;
++	if (X86_MODRM_MOD(insn.modrm.value) == 3) {
++		off = insn_get_modrm_rm_off(&insn, regs);
++		if (off < 0)
++			return false;
++		src = *(unsigned long *)((u8 *)regs + off);
++	} else {
++		ea = insn_get_addr_ref(&insn, regs);
++		if (ea == (void __user *)-1L ||
++		    copy_from_user(&src, ea, X86_REX_W(rex) ? 8 : 4))
++			return false;	/* real hw would fault #PF, not #UD */
++	}
++	churro_adx_exec(dst, src, &regs->flags, op == CHURRO_ADOX, X86_REX_W(rex));
++
++	regs->ip += insn.length;
++	atomic64_inc(&churro_vexemu_count[op]);
++	if (__ratelimit(&churro_vexemu_rs))
++		pr_info("churro-vexemu: %s in %s[%d], trap #%lld\n",
++			churro_vexemu_names[op], current->comm, task_pid_nr(current),
++			atomic64_read(&churro_vexemu_count[op]));
++	return true;
++}
++/* --- end ADX --- */
++
 +/* returns true when the #UD was one of the emulated instructions (see top) */
 +static bool handle_vex_ud(struct pt_regs *regs)
 +{
@@ -860,7 +947,7 @@
  {
 +	if (user_mode(regs)) {
 +		cond_local_irq_enable(regs);
-+		if (handle_vex_ud(regs)) {
++		if (handle_adx_ud(regs) || handle_vex_ud(regs)) {
 +			cond_local_irq_disable(regs);
 +			return;
 +		}

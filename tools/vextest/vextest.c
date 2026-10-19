@@ -58,6 +58,7 @@ extern void sha256msg2_rex44(u32 *r, const u32 *a, const u32 *b, const u32 *acc)
 extern void sha1nexte_rex41(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void sha256rnds2_rex45(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void ra_chain(u32 *x, const u32 *m);
+extern void adcx_r64_rex(u64 *s), adox_r64(u64 *s), adcx_r32(u64 *s), adox_m64_rex(u64 *s), adcx_m32(u64 *s);
 extern void vaesenc_256_reg(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void vaesenclast_256_reg(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void vaesdec_256_reg(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
@@ -357,6 +358,52 @@ static int ra_chain_test(void) {
 			if (got[i][j] != want[i][j]) {
 				if (!bad++) { lpos = 0; lbs("VEXTEST runahead/sha-chain FAIL xmm"); lbd(i); lbs(" got="); lbx(got[i][j]); lbs(" want="); lbx(want[i][j]); lbs("\n"); lb_flush(); }
 			}
+	return bad;
+}
+
+// ADX reference: dest += src + carry-in; carry via CF (adcx) or OF (adox) only, nothing else changes
+static void ref_adx(u64 *s, int adox, int w) {
+	u64 flag = adox ? 0x800 : 0x1, cin = (s[2] & flag) ? 1 : 0, c;
+	if (w) {
+		u64 r = s[0] + s[1], r2 = r + cin;
+		c = (r < s[0]) | (r2 < r);
+		s[0] = r2;
+	} else {
+		u64 t = (u64)(u32)s[0] + (u32)s[1] + cin;
+		s[0] = (u32)t;
+		c = t >> 32;
+	}
+	s[2] = (s[2] & ~flag) | (c ? flag : 0);
+}
+static int adx_tests(int *total) {
+	static const struct { const char *name; void (*fn)(u64 *); int adox, w; } t[] = {
+		{ "adcx/r64-rex", adcx_r64_rex, 0, 1 }, { "adox/r64", adox_r64, 1, 1 },
+		{ "adcx/r32", adcx_r32, 0, 0 }, { "adox/m64-rex", adox_m64_rex, 1, 1 },
+		{ "adcx/m32", adcx_m32, 0, 0 },
+	};
+	// carry chains and edges: ~0 + 0 + 1, ~0 + 1, 32-bit wrap with a high half, plain sums
+	static const u64 in[][3] = {
+		{ ~0ull, 0, 0xad7 }, { ~0ull, 1, 0x202 }, { 0x12345678ffffffffull, 1, 0xa03 },
+		{ 0x8000000000000000ull, 0x8000000000000000ull, 0x2c2 }, { 5, 7, 0x203 }, { 0xfffffffe, 1, 0x803 },
+	};
+	int bad = 0;
+	for (unsigned i = 0; i < sizeof t / sizeof t[0]; i++) {
+		int ok = 1;
+		for (unsigned j = 0; j < sizeof in / sizeof in[0]; j++) {
+			u64 got[3] = { in[j][0], in[j][1], in[j][2] }, want[3] = { in[j][0], in[j][1], in[j][2] };
+			t[i].fn(got);
+			ref_adx(want, t[i].adox, t[i].w);
+			if (got[0] != want[0] || ((got[2] ^ want[2]) & 0x8d5)) {	/* CF PF AF ZF SF OF */
+				if (ok) { lpos = 0; lbs("VEXTEST "); lbs(t[i].name); lbs(" FAIL in"); lbd(j);
+					lbs(" got="); lbx(got[0]); lbs("/"); lbx(got[2]); lbs(" want="); lbx(want[0]);
+					lbs("/"); lbx(want[2]); lbs("\n"); lb_flush(); }
+				ok = 0;
+			}
+		}
+		(*total)++;
+		bad += !ok;
+		if (ok) { lpos = 0; lbs("VEXTEST "); lbs(t[i].name); lbs(" ok\n"); lb_flush(); }
+	}
 	return bad;
 }
 
@@ -874,6 +921,10 @@ void cstart(long *sp) {
 	lbs(" digest=");
 	for (int i = 0; i < 8; i++) lbx(digest[i]);
 	lbs("\n"); lb_flush();
+	int at = 0, af = adx_tests(&at);
+	total += at;
+	pass += at - af;
+	if (af) stage_fail |= 1;
 	int rf = ra_chain_test();
 	total++;
 	if (!rf) pass++;

@@ -207,6 +207,27 @@ SHAREX(sha256msg2_rex44, 0x44, 0xcd, %ymm10)
 SHAREX(sha1nexte_rex41, 0x41, 0xc8, %ymm2)
 SHAREX(sha256rnds2_rex45, 0x45, 0xcb, %ymm10)
 
+// ADX (adcx/adox): s = rdi: s[0] = dest in/out, s[1] = source, s[2] = RFLAGS in/out.
+// Only caller-saved registers; 32-bit forms zero-extend into the 64-bit dest.
+#define ADXSTUB(name, d64, s64, op, src, dst)	\
+	.globl name;				\
+name:						\
+	mov	0(%rdi), d64;			\
+	mov	8(%rdi), s64;			\
+	pushq	16(%rdi);			\
+	popfq;					\
+	op	src, dst;			\
+	pushfq;					\
+	popq	16(%rdi);			\
+	mov	d64, 0(%rdi);			\
+	ret
+
+ADXSTUB(adcx_r64_rex, %r8, %r9, adcx, %r9, %r8)
+ADXSTUB(adox_r64, %rax, %rcx, adox, %rcx, %rax)
+ADXSTUB(adcx_r32, %rax, %rcx, adcx, %ecx, %eax)
+ADXSTUB(adox_m64_rex, %r11, %rsi, adox, 8(%rdi), %r11)
+ADXSTUB(adcx_m32, %rdx, %rsi, adcx, 8(%rdi), %edx)
+
 // ra_chain(x = rdi: 16 xmm in/out, m = rsi: 64-byte-aligned 96-byte buffer): one trapping
 // SHA-NI op followed by straight-line plain SSE in the shape of BoringSSL's SHA-256 loop, so the
 // kernel's run-ahead interprets everything up to the stores. Mirrored by ra_model() in vextest.c.
