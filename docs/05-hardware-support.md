@@ -170,6 +170,9 @@ fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup s
   Chromium's libc++ namespace `std::__Cr` with the NDK's static libc++ kept local
   (+ a `__libcpp_verbose_abort` → abort shim); `OPENSSL_SMALL` like Chromium on Android; not FIPS.
   Installed as `/system/lib64/libcrypto_httpengine.so`, bind-mounted over the APEX's copy.
+  **Confirmed on the G20AJ**: AES-GCM traps 0 during setup, Play downloads/installs, Chrome,
+  Firefox, Reddit; 300 M traps in 12.5 min instead of 740–810 M (docs/02; one earlier run showed
+  no change, possibly still the previous image).
   Why it matters (G20AJ after 2a): the remaining 488 M AES-GCM traps (60 %) are 256-bit VAES in
   `CronetNet` threads, which only a Panther-Lake-compiled copy executes on Haswell; the
   app-bundled Cronets (GMS CronetDynamite, Play Store's libcronet) dispatch by CPUID.
@@ -179,6 +182,15 @@ fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup s
   HttpEngine, the Cronet GMS bundles itself (not replaceable), or Conscrypt (2a). To decide
   first: add the faulting address's mapped file (VMA file name) to the emulator's ratelimited trap
   line, which also locates the `vpdpwssd` hot spots below.
+
+**To do: rebuild `libz.so` (zlib).** After 2a/2b, `vpdpwssd` is 99 % of the remaining traps on the
+G20AJ (296 M in 12.5 min), and the trap lines put most of it in `libz.so` (sampled lines: 289 on
+`dm-0` + 49 on `dm-2`; next: `libcodec2_soft_avcdec.so` 50, `libicing_anywhere.so` 13): zlib's
+checksums (Adler-32/CRC) compiled for Panther Lake, hit by every download, APK unpack and
+inflate. zlib has a small, stable C API, so it can be rebuilt for x86-64-v3 like BoringSSL
+(same source as the image: AOSP `external/zlib`, Chromium's zlib fork), checked against the
+image's exports and installed in place (+ bind mounts for any APEX copies). First: find every
+`libz.so` copy (system, vendor, APEXes) and which partitions `dm-0`/`dm-2` are.
 
 **To do: `vpdpwssd` (AVX-VNNI) cost.** Biggest non-crypto trap source on gap CPUs (G20AJ: 226 M
 in 15 min; VivoBook: 136 M per boot), compiler-generated across ~108 files (Skia/HWUI/RenderEngine
