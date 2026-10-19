@@ -17,7 +17,13 @@ for n in android.hardware.gatekeeper-service.trusty android.hardware.security.se
          vendor.google.desktop.oemlock-service; do
   rm -f "$V/etc/init/$n.rc" "$V/etc/vintf/manifest/$n.xml"
 done
-echo "   vendor: Trusty/GSC HALs removed"
+# Also Google-hardware-only services that just fail and restart all session: the Pixel face HAL
+# (talks to a Trusty TA, SIGSEGVs), the EC charge-control HAL (exits at once, init restarts it
+# every 5 s).
+rm -f "$V/apex/com.google.android.hardware.biometrics.face.apex" \
+      "$V/etc/init/hal_desktop_charge_control_default.rc" \
+      "$V/etc/vintf/manifest/com.android.desktop.power.charge_control.xml"
+echo "   vendor: Trusty/GSC HALs, face HAL, EC charge control removed"
 
 # --- fetch + unpack the emulator vendor partition once (cached) ---
 E=$CACHE/emu-vendor
@@ -53,3 +59,39 @@ while [ ${#todo[@]} -gt 0 ]; do
   done
 done
 echo "   vendor: software KeyMint installed (+libs:$added)"
+
+# --- software Gatekeeper (lock-screen PIN/password) ---
+# The Trusty gatekeeper is gone above; without any Gatekeeper HAL gatekeeperd can't enroll and
+# setting a lock-screen credential fails (IGateKeeperService.clearSecureUserId:
+# IllegalStateException). Install AOSP's non-secure Gatekeeper from the emulator's
+# com.android.hardware.gatekeeper.nonsecure APEX as /vendor/bin/hw/android.hardware.gatekeeper-service,
+# which the image's file_contexts already label hal_gatekeeper_default_exec (AOSP's default
+# gatekeeper domain, allowed to register IGatekeeper/default + ISharedSecret/gatekeeper).
+G=$CACHE/emu-gatekeeper
+if [ ! -f "$G/.done" ]; then
+  rm -rf "$G"; mkdir -p "$G/x"
+  unzip -p "$E/apex/com.android.hardware.gatekeeper.nonsecure.apex" apex_payload.img > "$G/p.img"
+  debugfs -R "rdump / $G/x" "$G/p.img" >/dev/null 2>&1; rm -f "$G/p.img"
+  [ -x "$G/x/bin/hw/android.hardware.gatekeeper-service.nonsecure" ] || { echo "gatekeeper not found in the emulator APEX" >&2; exit 1; }
+  touch "$G/.done"
+fi
+gk=$V/bin/hw/android.hardware.gatekeeper-service
+install -m 0755 -o root -g 2000 "$G/x/bin/hw/android.hardware.gatekeeper-service.nonsecure" "$gk"
+lbl "$gk" u:object_r:hal_gatekeeper_default_exec:s0
+printf '%s\n' 'service vendor.gatekeeper-default /vendor/bin/hw/android.hardware.gatekeeper-service' \
+  '    class early_hal' '    user system' '    group system' > "$V/etc/init/android.hardware.gatekeeper-service.rc"
+lbl "$V/etc/init/android.hardware.gatekeeper-service.rc" u:object_r:vendor_configs_file:s0
+for x in "$G"/x/etc/vintf/*.xml; do
+  install -m 0644 "$x" "$V/etc/vintf/manifest/"; lbl "$V/etc/vintf/manifest/$(basename "$x")" u:object_r:vendor_configs_file:s0
+done
+todo=("$gk"); added=""
+while [ ${#todo[@]} -gt 0 ]; do
+  f=${todo[0]}; todo=("${todo[@]:1}")
+  for n in $(readelf -d "$f" | awk '/NEEDED/ {gsub(/[][]/, "", $NF); print $NF}'); do
+    [ -e "$V/lib64/$n" ] && continue
+    s=$G/x/lib64/$n; [ -e "$s" ] || s=$E/lib64/$n; [ -e "$s" ] || continue
+    install -m 0644 "$s" "$V/lib64/"; lbl "$V/lib64/$n" "$libl"
+    added="$added $n"; todo+=("$s")
+  done
+done
+echo "   vendor: software Gatekeeper installed (+libs:${added:- none})"

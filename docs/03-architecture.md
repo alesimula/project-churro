@@ -103,8 +103,13 @@ files get a sibling's label or an explicit one.
 * `security-software` (default) — replaces the Googlebook security stack (Trusty VM on x86 pKVM
   + pvmfw DICE + GSC/Ti50) with Android's software implementations: AOSP's software KeyMint
   (from Google's public Android 17 emulator image) as `android.hardware.security.keymint-service`
-  (a name Googlebook's sepolicy already labels `hal_keymint_default_exec`), gatekeeperd's
-  built-in SoftGateKeeper, Trusty/GSC HALs and VINTF entries removed, gscd disabled.
+  (a name Googlebook's sepolicy already labels `hal_keymint_default_exec`), AOSP's non-secure
+  Gatekeeper (from the emulator's `com.android.hardware.gatekeeper.nonsecure` APEX) as
+  `/vendor/bin/hw/android.hardware.gatekeeper-service` (labelled `hal_gatekeeper_default_exec`;
+  this gatekeeperd has no software fallback: without a HAL no lock-screen PIN/password can be
+  set), Trusty/GSC HALs and VINTF entries removed, gscd disabled. Also removed because they only
+  fail and restart all session: the Trusty security VM launchers (system_ext), the Pixel face HAL
+  APEX, the EC charge-control HAL.
   → the Churro counterpart of Croissant's swtpm.
 * `security-trusty-vm` (experimental) — keep Trusty, run the security VM non-protected or
   protected (`androidboot.churro.security_vm=`). Only useful on hardware where x86 pKVM works;

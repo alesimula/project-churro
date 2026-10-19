@@ -28,7 +28,7 @@ New detail from them: first boot copies **49 AICore model preloads (4.28 GB)** p
 | Compatibility layer | own ext4 `/oem` partition + separate derived vendor partition | features repack the vendor EROFS; packs + logger in our ramdisk |
 | Disabling Google services | `androidboot.init_rc=/oem/init.gbrunch.rc`: replaces the top-level init.rc and imports an **allowlist** of service files (28 left out) | delete/stub files in vendor, blacklist kernel drivers |
 | Kernel cmdline | built from scratch (allowlist) | Google's, filtered (blocklist) |
-| Security HALs | Cuttlefish nonsecure KeyMint/Gatekeeper on `/oem` | AOSP software KeyMint (emulator image) + SoftGateKeeper |
+| Security HALs | Cuttlefish nonsecure KeyMint/Gatekeeper on `/oem` | AOSP software KeyMint + non-secure Gatekeeper (both from the emulator image) |
 | Userdata | **unencrypted** (fstab override drops fileencryption) | metadata encryption kept |
 | Boot control | AOSP default boot HAL (no firmware calls) | Google's HAL + no-op `crossystem` stub |
 | Logs | Android shell service snapshots logcat to a FAT partition every 10 s | static rdinit logger: kmsg + logcat (logd socket) from the first second, crash-safe fixed-size files, readable in Windows; on-screen console, earlycon entry |
