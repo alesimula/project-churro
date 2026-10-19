@@ -138,8 +138,24 @@ module + integrity hash, `OPENSSL_SMALL`, `BORINGSSL_ANDROID_SYSTEM`, static hid
 path and Haswell/Broadwell run plain AES-NI/SSSE3/AVX2 code natively. Installed over
 `/system/lib64` and `/vendor/lib64` `libcrypto.so` + `libssl.so` only if the exported dynamic
 symbols (names, types, binding, data sizes) equal the image's. The emulator (incl. the AES/CLMUL
-fast path) stays for everything else. Not covered yet (phase 2): the copies inside signed APEXes
-(Conscrypt = Java TLS, Cronet/Tethering), which still trap.
+fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup screen 4:02 → 2:08
+(docs/02). Not covered yet: the copies inside signed APEXes, which still trap (Java crypto, TLS,
+Wi-Fi, Bluetooth):
+
+- **Phase 2a — platform libcrypto/libssl in APEXes.** 11 APEXes carry their own copy, all with
+  exactly the system library's exports, so the `crypto-generic` build drops in unchanged:
+  Conscrypt (`libcrypto` + `libssl` + `boringssl_self_test64`), Tethering, Wi-Fi,
+  ConfigInfrastructure (`libcrypto` + `libssl`), Bluetooth, adbd, OnDevicePersonalization
+  (`libcrypto`); vendor: ClearKey DRM, crosfp fingerprint, StrongBox KeyMint (disabled; + `libssl`
+  for the last two). virt/compos only link to it. Work: unpack each APEX payload, replace, repack,
+  re-sign, and make the image accept our APEX key.
+- **Phase 2b — `libcrypto_httpengine.so`.** One copy, in the Tethering APEX (HttpEngine = platform
+  Cronet). A different BoringSSL: Cronet's bundled one (`external/cronet/stable/third_party/boringssl`,
+  Chromium's version pin), 324 exports with `@@INTERSECTED_SYMBOLS` versions (vs. 2695). Needs its
+  own version search, build options and export gate; packaging as in 2a.
+
+Not fixable this way: BoringSSL bundled inside apps (e.g. GMS's own Cronet, if that's what
+`CronetNet` threads use); the emulator keeps handling those.
 
 brunch (docs/06) does none of this: it selects a prebuilt image per CPU family and declares
 older CPUs unsupported.
