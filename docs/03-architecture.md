@@ -109,7 +109,13 @@ files get a sibling's label or an explicit one.
   this gatekeeperd has no software fallback: without a HAL no lock-screen PIN/password can be
   set), Trusty/GSC HALs and VINTF entries removed, gscd disabled. Also removed because they only
   fail and restart all session: the Trusty security VM launchers (system_ext), the Pixel face HAL
-  APEX, the EC charge-control HAL.
+  APEX, the EC charge-control HAL. `patch-product.sh` sets `remote_provisioning.{tee,strongbox}.rkp_only=0`:
+  Googlebooks take attestation keys only from Google's provisioning server, which rejects our
+  software KeyMint ("444 Device not registered"), so every attested key failed (Play Integrity
+  tokens, apps' key attestation); now KeyMint's own attestation key is the fallback
+  (a software chain: still "not genuine" to anyone who verifies it). It also drops
+  `remote_provisioning.hostname`, which turns RKPD off ("RKP is disabled"): otherwise keystore
+  still waited 10 s for each server round trip before falling back.
   → the Churro counterpart of Croissant's swtpm.
 * `security-trusty-vm` (experimental) — keep Trusty, run the security VM non-protected or
   protected (`androidboot.churro.security_vm=`). Only useful on hardware where x86 pKVM works;
