@@ -81,7 +81,9 @@ P=$C/packs-$PROF-$BID; rm -rf "$P"
 # (claimed the iGPU before xe, no firmware) and its drm_display_helper replaced the one xe links
 # against. i915 now ships via drivers-extra (vendor_dlkm, linked to Google's drm_display_helper,
 # aliases limited to GPUs the image's xe doesn't bind), so it only loads on pre-Gen12 Intel.
-bash "$HERE/tools/make-pack.sh" "$MD" "$P/gpu" virtio-gpu vgem
+# No vgem either: loaded first, it took renderD128 everywhere, and Google's VA-API video decoder
+# opens only that node (all hardware video decoding failed). gfx-soft.rc loads it when needed.
+bash "$HERE/tools/make-pack.sh" "$MD" "$P/gpu" virtio-gpu
 bash "$HERE/tools/make-pack.sh" "$MD" "$P/storage" ahci ata_piix ata_generic vmd sdhci-acpi sdhci-pci
 bash "$HERE/tools/make-pack.sh" "$MD" "$P/virt" virtio_pci virtio_input
 # opt-in (auto --packs ...,wifi): replaces the image's out-of-tree cfg80211/mac80211, so the

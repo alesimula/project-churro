@@ -1,0 +1,51 @@
+diff -ru a/src/gallium/drivers/nouveau/nv50/nv50_miptree.c b/src/gallium/drivers/nouveau/nv50/nv50_miptree.c
+--- a/src/gallium/drivers/nouveau/nv50/nv50_miptree.c	2026-10-20 18:06:45.120655065 +0200
++++ b/src/gallium/drivers/nouveau/nv50/nv50_miptree.c	2026-10-20 18:06:45.132468607 +0200
+@@ -191,6 +191,7 @@
+       return false;
+ 
+    stride = mt->level[0].pitch;
++   whandle->offset = mt->base.offset;
+ 
+    return nouveau_screen_bo_get_handle(pscreen,
+                                        mt->base.bo,
+@@ -403,6 +404,7 @@
+ {
+    struct nv50_miptree *mt;
+    unsigned stride;
++   struct winsys_handle wh = *whandle;
+ 
+    /* only supports 2D, non-mipmapped textures for the moment */
+    if ((templ->target != PIPE_TEXTURE_2D &&
+@@ -416,13 +418,17 @@
+    if (!mt)
+       return NULL;
+ 
+-   mt->base.bo = nouveau_screen_bo_from_handle(pscreen, whandle, &stride);
++   /* Churro: a plane of a multi-planar buffer (NV12/YV12 from Android gralloc) is the
++    * BO at an offset: import the BO, then point the resource at the plane. */
++   wh.offset = 0;
++   mt->base.bo = nouveau_screen_bo_from_handle(pscreen, &wh, &stride);
+    if (mt->base.bo == NULL) {
+       FREE(mt);
+       return NULL;
+    }
+    mt->base.domain = mt->base.bo->flags & NOUVEAU_BO_APER;
+-   mt->base.address = mt->base.bo->offset;
++   mt->base.address = mt->base.bo->offset + whandle->offset;
++   mt->base.offset = whandle->offset;
+ 
+    mt->base.base = *templ;
+    pipe_reference_init(&mt->base.base.reference, 1);
+diff -ru a/src/gallium/drivers/nouveau/nvc0/nvc0_surface.c b/src/gallium/drivers/nouveau/nvc0/nvc0_surface.c
+--- a/src/gallium/drivers/nouveau/nvc0/nvc0_surface.c	2026-10-20 18:06:45.124592913 +0200
++++ b/src/gallium/drivers/nouveau/nvc0/nvc0_surface.c	2026-10-20 18:06:45.132468607 +0200
+@@ -94,7 +94,7 @@
+    uint32_t width, height, depth;
+    uint32_t format;
+    uint32_t mthd = dst ? NV50_2D_DST_FORMAT : NV50_2D_SRC_FORMAT;
+-   uint32_t offset = mt->level[level].offset;
++   uint32_t offset = mt->level[level].offset + mt->base.offset;
+ 
+    format = nvc0_2d_format(pformat, dst, dst_src_pformat_equal);
+    if (!format) {

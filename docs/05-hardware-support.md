@@ -233,7 +233,7 @@ older CPUs unsupported.
 | AMD | amdgpu module + firmware (distro module set); no userspace yet | Mesa radeonsi/radv + allocator backend + GRUB detection |
 | NVIDIA | `gpu-nouveau` (below): nouveau display + GSP firmware + allocator with VRAM buffers; GL = Zink on NVK (Turing+) or nouveau GL (older), Vulkan = NVK; only where nothing else drives the display | MSI discrete mode (RTX 5070 Ti, GB205) works: panel + HDMI, Chrome (NVK AHB patch); hybrid machines: NVIDIA unused (HDMI wired to it stays dark) → reverse PRIME / render offload |
 | No usable GPU | no UI: no allocator backend for simpledrm/vgem, and Mesa's software path needs llvmpipe (LLVM) to import buffers | fallback allocator backend + llvmpipe |
-| VMs (QEMU) | virtio-gpu, vgem in the `gpu` pack | — |
+| VMs (QEMU) | virtio-gpu in the `gpu` pack; vgem loaded by `gfx-soft.rc` (not on machines with a GPU: it would take renderD128) | — |
 
 The graphics stack is picked at boot (`--gfx auto`, the default): GRUB reads PCI config space -
 an Intel iGPU at 00:02.0 (hybrid laptops included) → `native` if the image's `xe.ko` binds its
@@ -260,8 +260,8 @@ and `vgem`/`simpledrm` are not among them. In QEMU the virtio-gpu backend is use
 which is why it worked there. Worth keeping for debugging and GPU-less machines: the fix is a
 `gfx/minigbm-patches/` patch adding `INIT_DUMB_DRIVER(vgem)` (+ `simpledrm`) to `dumb_driver.c`
 / `drv_backend_list`, tried **only as a last resort** in `cros_gralloc_driver.cc`
-(`init_try_nodes`): vgem is always loaded and usually gets renderD128 *before* the real GPU,
-so a plain backend would make minigbm pick vgem on every machine. Then check Mesa's
+(`init_try_nodes`). vgem is now loaded only by `gfx-soft.rc`, so it no longer takes renderD128
+from the real GPU (that broke hardware video decoding, "Known gaps"). Then check Mesa's
 kms_swrast/llvmpipe can map those buffers (the row above).
 
 **Gotcha when testing `soft` by hand:** the main GRUB entries append the auto-detected `$gfx`
@@ -300,11 +300,24 @@ APEX updates together with `update_engine` (Open item "OTA updater").
 black (its GPU process: `error creating EGLImage: 0x3000`); Reddit aborts after a while in HWUI
 (`skia: Could not create EGL image, err = (0x3000)` → `AutoBackendTextureRelease.cpp Invalid
 GrBackendTexture` → SIGABRT in RenderThread). Around them the software H.264 decoder logs
-`C2SoftAvcDec: fetchGraphicBlock for Output failed`. Likely cause: video-decoder output buffers
-(YUV, from our minigbm nouveau backend) that Mesa's nouveau GL can't import as EGLImages, or that
-minigbm can't allocate for that usage. To check: which format/usage the failing buffers have
-(gralloc logs), whether minigbm's nouveau backend lists YUV formats, and Mesa nouveau's
-`EGL_ANDROID_image_native_buffer` path; compare with NVK/Zink on Turing+.
+`C2SoftAvcDec: fetchGraphicBlock for Output failed` (only after the app died: `BR_DEAD_REPLY`).
+Cause (from Mesa's source): decoder output is multi-planar YUV, one BO with the chroma plane at
+an offset; Mesa imports each plane as a dma-buf with that offset, and nouveau GL's
+`nouveau_screen_bo_from_handle()` rejects any offset ≠ 0. Android's EGL path then returns
+`EGL_NO_IMAGE` without setting an error, hence `0x3000` (`EGL_SUCCESS`). **Fix (to verify on the
+G20AJ):** `gfx/mesa-patches/nouveau-import-plane-offset.patch`: import the BO at offset 0 and
+point the resource at the plane (`address`/`offset`, which texturing, render targets, transfers
+and the 2D engine already honour). nvc0 (Fermi-Ampere) only; Tesla's 2D path not adjusted. Zink
+on NVK (Turing+) is not affected (Vulkan takes plane offsets).
+
+**Hardware video decoding (Intel, `native`): every decode failed.** VivoBook (Tiger Lake, xe):
+YouTube in Firefox loads forever, Reddit videos don't play, Camera can record but not play back.
+Google's decoders (`c2.cros-codecs.vaapi.*`) opened `vgem` (`vgem_drv_video.so` → -1) and failed
+(`returned error: 0x16`, 104 of 104 times): the codec service's other threads try the next
+render node, but the decoder thread opens only `renderD128`, which `vgem` took by loading in first
+stage before `xe`. Recording worked because the encoder path tries the next node. Fix: `vgem` left
+out of the `gpu` pack, loaded by `gfx-soft.rc` only (the one stack that needs it). Affects every
+Intel machine on `native` (the MSI too).
 
 **Audio** (`features/audio-generic`, docs/03). Covered today: HD-audio codecs on legacy
 `snd_hda_intel` (`PCH`, `Generic`/`Generic_1`, `Intel`) and on SOF's generic HDA machine

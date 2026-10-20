@@ -1,7 +1,10 @@
 # Mesa software rendering (kms_swrast/softpipe) on a vgem render node, scanout on whatever KMS
 # device exists (simpledrm on the UEFI framebuffer works). Any GPU, slow.
 # Mesa reads LIBGL_ALWAYS_SOFTWARE from debug.mesa.libgl.always.software on Android.
+# vgem only here: on machines with a GPU it must not take renderD128 (see tools/prepare.sh).
+# Via vendor_modprobe: init itself may not load modules after first stage (SELinux sys_module).
 on early-init
+    exec u:r:vendor_modprobe:s0 -- /vendor/bin/modprobe -d /vendor/lib/modules vgem
     setprop ro.hardware.egl mesa
     setprop ro.hardware.vulkan none
     setprop ro.hwui.use_vulkan false
