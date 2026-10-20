@@ -41,4 +41,12 @@ for rc in "$T"/etc/init/*.rc; do
   c=$(sed -E '/^\s*write \/sys\/.*(intel-rapl|tcc_offset)/d' "$rc"); printf '%s\n' "$c" > "$rc"
   echo "   vendor: $(basename "$rc"): board CPU power limits / thermal offset removed"
 done
+# vold mounts (rw) or offers to format whatever the fstab's voldmanaged wildcards match. On a
+# Googlebook: SD slot + 2nd NVMe; on a PC: internal disks (Windows' NVMe/eMMC). Keep only USB.
+for f in "$T"/etc/fstab.*; do
+  grep -q 'voldmanaged=' "$f" || continue
+  c=$(sed -E '/voldmanaged=/{/^\/devices\/\*\/usb/!d}' "$f"); printf '%s\n' "$c" > "$f"
+  ! grep 'voldmanaged=' "$f" | grep -v '^/devices/\*/usb' >/dev/null || { echo "internal disks still vold-managed in $f" >&2; exit 1; }
+  echo "   vendor: $(basename "$f"): vold limited to USB (internal NVMe/eMMC/SD lines removed)"
+done
 echo "   vendor: firmware updaters removed (flashrom, futility, vpd, fwtool, elogtool, fwupd); crossystem = no-op stub"

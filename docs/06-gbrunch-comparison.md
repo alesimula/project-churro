@@ -91,10 +91,10 @@ New detail from them: first boot copies **49 AICore model preloads (4.28 GB)** p
    would mount FAT partitions read-write and can offer to "set up/format" a disk it doesn't
    understand — on a PC that can be Windows. Already seen: it mounted our own boot stick's
    CHURRO-LOG as "USB storage". The MSI is safe only by accident: its NVMe is behind Intel VMD
-   (`RstVmd` ACPI tables) and Google's kernel has no VMD driver, so the disk is invisible. Plan:
-   ship our own fstab without the `nvme` and `mmc_host` lines (keep `usb` for sticks; consider
-   excluding the boot disk). Only then add `CONFIG_VMD` to our kernel profile (needed to install
-   on VMD laptops like the MSI).
+   (`RstVmd` ACPI tables) and Google's kernel has no VMD driver, so the disk is invisible.
+   **Done:** `firmware-lockdown` drops the `nvme` and `mmc_host` lines (`usb` stays; excluding the
+   boot stick itself is still open), and `VMD` is now a `storage`-pack module (install on VMD
+   laptops like the MSI).
 2. **Google's OTA updater.** `update_engine`/`update_verifier` still run. Once a signed-in install
    gets an update offer it would download GBs into userdata (and Virtual A/B snapshots use /data
    too) for a slot our GRUB never boots. GBRUNCH doesn't start them; we should do the same.

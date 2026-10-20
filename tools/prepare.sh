@@ -82,7 +82,7 @@ P=$C/packs-$PROF-$BID; rm -rf "$P"
 # against. i915 now ships via drivers-extra (vendor_dlkm, linked to Google's drm_display_helper,
 # aliases limited to GPUs the image's xe doesn't bind), so it only loads on pre-Gen12 Intel.
 bash "$HERE/tools/make-pack.sh" "$MD" "$P/gpu" virtio-gpu vgem
-bash "$HERE/tools/make-pack.sh" "$MD" "$P/storage" ahci sdhci-acpi sdhci-pci
+bash "$HERE/tools/make-pack.sh" "$MD" "$P/storage" ahci ata_piix ata_generic vmd sdhci-acpi sdhci-pci
 bash "$HERE/tools/make-pack.sh" "$MD" "$P/virt" virtio_pci virtio_input
 # opt-in (auto --packs ...,wifi): replaces the image's out-of-tree cfg80211/mac80211, so the
 # vendor iwlwifi stops loading. Only firmware-less drivers: first stage can't load firmware.

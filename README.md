@@ -42,7 +42,10 @@ Secure Boot, boot. If it stops or hangs, boot the GRUB entry "debug": the log sc
 the machine halts on errors instead of rebooting, and everything is saved on the stick's
 **CHURRO-LOG** drive (visible in Windows): `boot.log` (kernel + Android init) and `logcat.log`
 (Android's own log, e.g. why a service crashes); the previous boot's are `*.prev.log`.
-Install to a disk from any Linux live session: `sudo ./churro.sh install churro.img /dev/nvme0n1`.
+Install to a disk from any Linux live session: `sudo ./churro.sh install churro.img /dev/nvme0n1`
+(or `/dev/sda` for SATA / M.2 SATA, `/dev/mmcblk0` for eMMC). Supported controller modes: AHCI,
+IDE, Intel VMD/RST; RST "Optane/NVMe remapping" isn't (switch the BIOS to AHCI). Android only
+auto-mounts USB drives: internal and secondary disks stay untouched.
 
 ## What the conversion does
 
@@ -53,7 +56,7 @@ Install to a disk from any Linux live session: `sudo ./churro.sh install churro.
 2. **Kernel**: Churro rebuilds **the very same kernel** as the image's GKI from Google's public
    source (same commit, config, toolchain, release string and kABI CRCs — the image's own modules
    still load), picked automatically from the image, without KMI trimming, with small fixes in
-   `kmod/patches/` and extra drivers: i915 (older Intel), simpledrm (any UEFI framebuffer), AHCI, virtio, vgem, and a
+   `kmod/patches/` and extra drivers: i915 (older Intel), simpledrm (any UEFI framebuffer), SATA (AHCI/IDE), Intel VMD, virtio, vgem, and a
    distro-like module set (Arch Linux's driver modules, ~3000) that `features/drivers-extra`
    adds to vendor_dlkm after an ABI check; Android loads them by device ID, like udev.
    `features/firmware-extra` adds their firmware (linux-firmware, Intel SOF audio, regulatory.db);

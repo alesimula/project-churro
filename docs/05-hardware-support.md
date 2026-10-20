@@ -14,7 +14,7 @@ without asking**. On any other PC each of these can damage hardware or lock you 
 | `fwupd` + `fwupd_blocking_update` (every boot, `ApprovalRequired=false`, LVFS enabled) | updates touchscreen, camera, USB-hub firmware | reflashes any matching SSD, hub, dock, camera, Thunderbolt controller | removed |
 | `gscutil`, `check_tpm_clear` (every boot, `/dev/tpm0`) | updates / resets the Google security chip | sends vendor/clear commands to the PC's TPM → **BitLocker recovery, lost TPM keys** | TPM drivers blacklisted (the tools find no TPM) |
 | `efi_pstore` (built into the GKI kernel) | saves the kernel log into UEFI variables on every panic | fills the PC's NVRAM → some firmwares stop booting | `efi_pstore.pstore_disable=1` always on the cmdline (found via the GBRUNCH comparison, docs/06) |
-| vendor fstab `voldmanaged` entries: `/devices/*/nvme/nvme[1-9]*`, `/devices/*/mmc_host*`, `/devices/*/usb*` | SD card / USB sticks as storage | Android mounts (rw) or offers to *format* a PC's second NVMe or internal eMMC holding Windows; already mounts our own boot stick's CHURRO-LOG | **OPEN** — fstab override planned (docs/06). Today's MSI is safe only because its NVMe is behind Intel VMD, which the kernel can't see |
+| vendor fstab `voldmanaged` entries: `/devices/*/nvme/nvme[1-9]*`, `/devices/*/mmc_host*`, `/devices/*/usb*` | SD card / USB sticks as storage | Android mounts (rw) or offers to *format* a PC's second NVMe or internal eMMC holding Windows; already mounts our own boot stick's CHURRO-LOG | **DONE** — `firmware-lockdown` removes the `nvme` and `mmc_host` lines (only `usb` stays: sticks, external drives). Internal and secondary disks are never auto-mounted; this is what made adding the VMD driver safe |
 
 Rules: these protections are in `churro.sh` and the default `firmware-lockdown` feature, and there
 are deliberately no switches to undo them. Anyone changing this must re-check the vendor and
@@ -273,7 +273,7 @@ adding a second value after it.
 
 | Area | Today | Next |
 |---|---|---|
-| Storage | NVMe/USB built in; `storage` pack: AHCI, eMMC (sdhci-pci/acpi) | — |
+| Storage | NVMe/USB built in; `storage` pack (first stage, so all bootable): AHCI (SATA, M.2 SATA), `ata_piix`/`ata_generic` (BIOS SATA in IDE mode), Intel VMD (RST/VMD mode), eMMC (sdhci-pci/acpi) | RST "Optane/NVMe remapping" (no Linux driver: switch BIOS to AHCI). Secondary internal disks and SD cards aren't mounted in Android (safety, above: SD shares the `mmc_host` line with eMMC); no NTFS in the kernel |
 | Intel Wi-Fi / BT | image's iwlwifi/btintel + `firmware-extra` (modinfo-declared names + `extra.txt` for Bluetooth) | MSI (AX211, `so-a0-gf-a0-89`) works. VivoBook 15 (AX201, Qu): Google's iwlmvm unmaps RX buffers the IOMMU never mapped (WARN storm, firmware crashes, downloads stall) → `churro.sh` always sets `iommu.passthrough=1`; Bluetooth `ibt-1040-0041` unverified |
 | Other Wi-Fi / BT | distro module set: ath9k/10k/11k/12k, rtw88/89, rtl8xxxu, mt76, brcm, … + their firmware + regulatory.db; they link against the image's cfg80211/mac80211 (CRCs match ours, so the ABI check accepts them) | verify on hardware; the opt-in `wifi` pack is probably obsolete |
 | Ethernet, USB devices, card readers, touchpads/touchscreens, sensors, HID | distro module set (`drivers-extra`, ~3000 modules, loaded by device alias) | test on more machines |

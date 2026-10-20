@@ -35,7 +35,7 @@ disk we booted from) and `androidboot.boot_source=external|internal`.
   r584948c, Android rustc 1.91.1, bindgen 0.72.1, pahole 1.31), same release string, kABI-stable
   CRCs — so the image's prebuilt vendor/system modules still load — but **without KMI symbol
   trimming** and with extra drivers (`kmod/profiles/*.conf`): i915 for older Intel, simpledrm on
-  the UEFI framebuffer for *any* GPU, AHCI/SATA, eMMC (sdhci-pci/acpi), virtio-gpu, fbcon, ath9k.
+  the UEFI framebuffer for *any* GPU, AHCI/SATA (+ IDE mode, Intel VMD), eMMC (sdhci-pci/acpi), virtio-gpu, fbcon, ath9k.
   Needed because the stock GKI exports only the KMI symbol list (an out-of-tree i915 build had 137
   unresolved symbols). It also trusts Google's GKI module signing cert (extracted from the image's
   vmlinux) so system_dlkm modules keep their "signed" status. `prepare.sh` refuses the kernel if
@@ -120,7 +120,8 @@ files get a sibling's label or an explicit one.
   toothless without `vpd`: system_server blocks on it and would be killed); `crossystem` becomes a
   no-op stub that accepts writes without touching anything (the boot-control HAL's
   markBootSuccessful needs `crossystem fw_result=success` to succeed, else "Checkpoint commit
-  failed" reboots every boot), and
+  failed" reboots every boot), the vendor fstab's `voldmanaged` wildcards for internal disks
+  (`nvme[1-9]`, `mmc_host`: on a PC that is Windows' disk; only `usb` stays), and
   `fwupd` + its boot-time blocking update script + cabinets (it runs at *every* boot with
   `ApprovalRequired=false` against the public LVFS and Googlebook peripheral cabinets: on a PC it
   could reflash SSDs, USB hubs, cameras, docks, Thunderbolt controllers). Independently,
