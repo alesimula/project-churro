@@ -1,0 +1,6 @@
+# nouveau stack: SurfaceFlinger + HWUI on Skia Vulkan, straight on NVK (Kepler and newer only)
+on early-init
+    setprop ro.hwui.use_vulkan true
+    setprop debug.renderengine.vulkan true
+    setprop debug.renderengine.backend skiavkthreaded
+    setprop debug.hwui.renderer skiavk

@@ -2,12 +2,12 @@
 # GL: Mesa picks by GPU - Zink on NVK for Kepler and newer (gfx/mesa-patches/
 # nouveau-zink-from-kepler.patch; upstream only from Turing), nouveau GL for Fermi and older
 # (NVK has no support). debug.mesa.nouveau.use.zink=true/false overrides it. Vulkan for apps:
-# NVK. RenderEngine/HWUI stay on GL (Skia's Vulkan backends not tried on NVK yet; NVK has
-# AHardwareBuffer support only through gfx/mesa-patches/nvk-android-hardware-buffer.patch).
+# NVK (AHardwareBuffer support only through gfx/mesa-patches/nvk-android-hardware-buffer.patch).
 on early-init
     setprop ro.hardware.egl mesa
     setprop ro.hardware.vulkan nouveau
-    setprop ro.hwui.use_vulkan false
-    setprop debug.renderengine.vulkan false
-    setprop debug.renderengine.backend skiaglthreaded
-    setprop debug.hwui.renderer skiagl
+
+# SurfaceFlinger (RenderEngine) + HWUI: Skia on Vulkan (vk) or on GL (gl).
+# vk by default; androidboot.churro.nouveau_ui=gl goes back to GL (Fermi and older need gl:
+# no Vulkan there).
+import /system_ext/etc/init/churro/nouveau-ui-${ro.boot.churro.nouveau_ui:-vk}.rc

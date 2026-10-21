@@ -475,7 +475,9 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   `debug.mesa.nouveau.use.zink=true/false`;
   `ro.hardware.vulkan=nouveau` (NVK) for apps. NVK has no AHardwareBuffer support upstream;
   `gfx/mesa-patches/nvk-android-hardware-buffer.patch` adds it (Chrome's ANGLE-on-Vulkan needs
-  it). SurfaceFlinger and HWUI stay on GL for now (Skia's Vulkan backends are the next step). Mesa is built with NVK
+  it). SurfaceFlinger and HWUI run Skia on Vulkan (NVK) via `nouveau-ui-vk.rc`; HWUI needs 2
+  graphics queues (`gfx/mesa-patches/nvk-two-graphics-queues.patch`). `androidboot.churro.nouveau_ui=gl`
+  goes back to Skia on GL (needed on Fermi and older: no Vulkan). Mesa is built with NVK
   (`gfx/build-mesa.sh`): its Rust parts use the kernel's Android Rust toolchain (Android std,
   panic=abort) and bindgen, plus cbindgen and the small libelf Mesa's own Android CI uses.
 - **SELinux:** Mesa finds GPUs through libdrm, which reads the GPU's PCI ID files in sysfs from

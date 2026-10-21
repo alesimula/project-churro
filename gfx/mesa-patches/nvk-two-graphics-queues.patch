@@ -1,0 +1,13 @@
+--- a/src/nouveau/vulkan/nvk_physical_device.c
++++ b/src/nouveau/vulkan/nvk_physical_device.c
+@@ -1679,7 +1679,9 @@
+                      VK_QUEUE_COMPUTE_BIT |
+                      VK_QUEUE_TRANSFER_BIT |
+                      VK_QUEUE_SPARSE_BINDING_BIT,
+-      .queue_count = 1,
++      /* Churro: Android HWUI (skiavk) requires >= 2 queues in the graphics family. Each
++       * NVK queue has its own GPU context, as the transfer family below already does. */
++      .queue_count = 2,
+    };
+    if (pdev->info.has_transfer_queue) {
+       pdev->queue_families[pdev->queue_family_count++] = (struct nvk_queue_family) {

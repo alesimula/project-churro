@@ -1,0 +1,6 @@
+# nouveau stack: SurfaceFlinger + HWUI on Skia GL (Zink on NVK, or nouveau GL before Kepler)
+on early-init
+    setprop ro.hwui.use_vulkan false
+    setprop debug.renderengine.vulkan false
+    setprop debug.renderengine.backend skiaglthreaded
+    setprop debug.hwui.renderer skiagl
