@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Firmware the image's own drivers ask for but the Googlebook image doesn't ship (it only carries
 # what its target needs, e.g. Panther Lake GPU firmware, its own Wi-Fi). Data-driven: the
-# firmware names every vendor_dlkm/system_dlkm module declares (modinfo -F firmware) + extra.txt
-# (names drivers build at runtime, e.g. Intel Bluetooth) + every file WHENCE lists for a shipped
-# driver, minus skip.txt, fetched from a pinned linux-firmware tag into /vendor/firmware; plus
+# firmware names every vendor_dlkm/system_dlkm module declares (modinfo -F firmware) + every file
+# WHENCE lists for a shipped driver + files matching name templates in the modules (names built
+# at runtime from hardware IDs) + extra.txt (anything still missed), minus skip.txt, fetched from a pinned linux-firmware tag into /vendor/firmware; plus
 # Intel's audio DSP firmware (sof-bin) and the Wi-Fi regulatory database, which live elsewhere. Names linux-firmware only creates when installed
 # (WHENCE "Link:", e.g. a dozen NVIDIA chips sharing one 60 MB GSP image) become hardlinks to a
 # single copy. The release tarball is downloaded and unpacked once (cache).
@@ -55,9 +55,21 @@ awk 'NR==FNR {m[$1]=1; next}
   /^-+$/ { ok=0 }
   ok && /^(File|RawFile|Link):/ { print $2 }' "$M/mods" "$C/WHENCE" > "$M/whence-files"
 
+# Names built from hardware IDs keep their printf template in the module's strings
+# ("ar3k/AthrBT_0x%08x.dfu", "intel/ibt-%04x-%04x.%s"): numeric conversions and %s become
+# wildcards, matched against the release's files, so every variant of a template ships.
+# Only templates with a numeric conversion: a bare "qcom/%s" would match whole vendor trees.
+(cd "$C" && find . -type f ! -path './.git/*' | sed 's|^\./||') > "$M/lf-files"
+find "$M" -name '*.ko' -exec strings -n 6 {} + 2>/dev/null |
+  grep -E '^[A-Za-z0-9_][A-Za-z0-9_./-]*%[-0-9.#]*[hlz]{0,2}[xXdu][A-Za-z0-9_./%-]*$' |
+  grep -E '/|\.(bin|fw|dfu|sfi|ddc|bseq|ucode|pnvm|hcd|seq|tlv|mbn|nvm)$' | sort -u |
+  sed -E 's/[.+]/\\&/g; s/%[-0-9.#]*[hlz]{0,2}[xXdu]/[0-9a-fA-F]+/g; s/%s/[^\/]*/g; s/^/^/; s/$/$/' > "$M/tmpl-re"
+grep -E -f "$M/tmpl-re" "$M/lf-files" > "$M/tmpl-files" || true
+echo "   vendor: $(wc -l < "$M/tmpl-re") firmware name templates in modules -> $(wc -l < "$M/tmpl-files") release files"
+
 { find "$M" -name '*.ko' -exec modinfo -F firmware {} + 2>/dev/null
-  cat "$M/whence-files"
-  grep -vE '^\s*(#|$)' "$F/extra.txt"; } | sort -u | while read -r f; do
+  cat "$M/whence-files" "$M/tmpl-files"
+  grep -vE '^\s*(#|$)' "$F/extra.txt" || true; } | sort -u | while read -r f; do   # may be empty
   case $f in *'*'*|/*|*..*) continue ;; esac          # globs / odd paths: skip
   [ -e "$FW/$f" ] && continue                         # the image already has it
   skip "$f" && continue

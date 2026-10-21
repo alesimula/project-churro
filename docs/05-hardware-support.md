@@ -274,7 +274,7 @@ adding a second value after it.
 | Area | Today | Next |
 |---|---|---|
 | Storage | NVMe/USB built in; `storage` pack (first stage, so all bootable): AHCI (SATA, M.2 SATA), `ata_piix`/`ata_generic` (BIOS SATA in IDE mode), Intel VMD (RST/VMD mode), eMMC (sdhci-pci/acpi) | RST "Optane/NVMe remapping" (no Linux driver: switch BIOS to AHCI). Secondary internal disks and SD cards aren't mounted in Android (safety, above: SD shares the `mmc_host` line with eMMC); no NTFS in the kernel |
-| Intel Wi-Fi / BT | image's iwlwifi/btintel + `firmware-extra` (modinfo-declared names + `extra.txt` for Bluetooth) | MSI (AX211, `so-a0-gf-a0-89`) works. VivoBook 15 (AX201, Qu): Google's iwlmvm unmaps RX buffers the IOMMU never mapped (WARN storm, firmware crashes, downloads stall) → `churro.sh` always sets `iommu.passthrough=1`; Bluetooth `ibt-1040-0041` unverified |
+| Intel Wi-Fi / BT | image's iwlwifi/btintel + `firmware-extra` (modinfo-declared names + name templates for Bluetooth) | MSI (AX211, `so-a0-gf-a0-89`) works. VivoBook 15 (AX201, Qu): Google's iwlmvm unmaps RX buffers the IOMMU never mapped (WARN storm, firmware crashes, downloads stall) → `churro.sh` always sets `iommu.passthrough=1`; Bluetooth `ibt-1040-0041` unverified |
 | Other Wi-Fi / BT | distro module set: ath9k/10k/11k/12k, rtw88/89, rtl8xxxu, mt76, brcm, … + their firmware + regulatory.db; they link against the image's cfg80211/mac80211 (CRCs match ours, so the ABI check accepts them) | verify on hardware; the opt-in `wifi` pack is probably obsolete |
 | Ethernet, USB devices, card readers, touchpads/touchscreens, sensors, HID | distro module set (`drivers-extra`, ~3000 modules, loaded by device alias) | test on more machines |
 | Audio | HDA + SOF from the image + distro codec/amp drivers; SOF firmware/topologies (sof-bin, merged per file), amp tunings via WHENCE; `audio-generic`: board audio cmdline/blocklist/options removed, codec drivers preloaded, HAL config for HD-audio cards (`PCH`, `Generic*`, `Intel`, `sofhdadsp`) bind-mounted over Google's board config, card renamed to the board's ID; works in QEMU (playback reaches the backend) | verify on MSI (speaker, headphones, mic, HDMI). Not covered: see "Known gaps" below |
@@ -403,7 +403,7 @@ Order:
 1. Done: `kmod/profiles/generic.conf` takes Arch Linux's module set from driver directories
    (docs/03), `drivers-extra` installs it with an ABI check against the image's modules.
 2. Done: `firmware-extra` covers them (modinfo names + every WHENCE file of a shipped driver +
-   sof-bin + wireless-regdb). Finding on the way: the image's cfg80211/mac80211 have the same CRCs
+   files matching name templates in the modules + sof-bin + wireless-regdb). Finding on the way: the image's cfg80211/mac80211 have the same CRCs
    as our build, so in-tree Wi-Fi drivers link against them (the Wi-Fi half of "conflicting stacks" above may
    not apply; to confirm on hardware).
 3. Boot-time stack picker (Wi-Fi, then graphics; replaces build-time `--packs wifi` / `--gfx`).

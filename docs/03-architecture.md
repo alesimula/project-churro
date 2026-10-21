@@ -155,7 +155,12 @@ files get a sibling's label or an explicit one.
   (`CHURRO_LINUX_FIRMWARE`; tarball downloaded and unpacked once into
   `$CHURRO_CACHE/linux-firmware-<tag>`): names every vendor_dlkm/system_dlkm module declares
   (`modinfo -F firmware`), every file WHENCE lists under a shipped driver (catches names drivers
-  build at runtime: board files, per-laptop amplifier tunings), and `extra.txt`. Plus two things
+  build at runtime: board files, per-laptop amplifier tunings), every release file matching a
+  printf name template found in the modules' strings (names built from hardware IDs at runtime,
+  e.g. `ar3k/AthrBT_0x%08x.dfu`, `intel/ibt-%04x-%04x.%s`; only templates with a numeric
+  conversion, so `dir/%s` can't pull whole trees), and `extra.txt` (manual leftovers, empty). Blind
+  spots left: names from in-driver tables (`%s` + table, e.g. btrtl; WHENCE usually covers them),
+  names joined from several strings, modules outside vendor_dlkm/system_dlkm. Plus two things
   outside linux-firmware: Intel's audio DSP firmware/topologies (sof-bin release, `CHURRO_SOF`)
   and the Wi-Fi regulatory database (wireless-regdb, `CHURRO_REGDB`). Patch scripts get
   `CHURRO_SUPER`/`CHURRO_HERE`/`EROFS_BIN` so they can read other LP partitions. Names
