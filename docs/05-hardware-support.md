@@ -307,8 +307,9 @@ Linux) → camera streams. Still open: Chrome on ANGLE-Vulkan restarts its GPU p
 **`timberslide` crash loop on every PC** (docs/02): the ChromeOS EC log daemon
 (`/system/etc/init/timberslide.rc`, `class core`) exits at once without an EC and restarts every
 ~5 s; as an updatable process each crash runs `flags_health_check`, which resets
-server-configurable flags (hundreds of times per session), and apexd tries reverts. Fix: drop
-the rc from system (it only reads the EC console log).
+server-configurable flags (hundreds of times per session), and apexd tries reverts. Done (not
+built yet): `features/firmware-lockdown/patch-system.sh` deletes the rc (timberslide only reads
+the EC console log; its binary stays, unused).
 
 **Bluetooth headset (HFP) audio: SCO packet size mismatch** (T300FA, AR3012). With `bt_wbs=on`
 the stack expects 60-byte SCO packets (mSBC), the controller sends 72 (CVSD over USB alt
