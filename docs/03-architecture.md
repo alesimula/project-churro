@@ -87,6 +87,46 @@ disk we booted from) and `androidboot.boot_source=external|internal`.
     `vt-no-ctrl-alt-del`): Churro behaviour, not upstream fixes — rebase them, their header says
     why they exist.
 
+  **Planned (not implemented): kernel-version-aware build.** Today everything is written for one
+  kernel (GKI 6.18.21 of this image). On a nearby kernel most patches would still apply (`patch`
+  tolerates shifted lines); the ones that touch moving code (`vex-emulate` in the x86 trap
+  handler, the nouveau display patches) are the likely breaks, and a backport the new kernel
+  already contains fails as "previously applied". Plan, for when a newer image (or a second
+  Googlebook with another kernel) appears:
+  - *Driver list:* derive the Arch config from the image instead of pinning it. `prepare.sh`
+    already reads the image's kernel version; take the newest Arch tag of the same series
+    (6.18.x for 6.18.21) and log it. Only the series matters: driver code always comes from
+    Google's source, so a newer series lists drivers that aren't there (dropped silently) and can
+    miss renamed options. `ARCH_LINUX_CONFIG_TAG` stays as a manual override.
+  - *One patch folder per kernel series:* `kmod/patches/6.18/`, later e.g. `kmod/patches/6.24/`.
+    When an image with a new series appears, copy the newest folder, then rebase or delete what
+    no longer applies (the patches are small: 16 files, ~3250 lines, `vex-emulate` ~1000 of them).
+    Point releases of a series (6.18.21 → 6.18.40) share the folder; small fixes go in place.
+    Why folders per series and not per point release or per patch: Google ships few series and
+    keeps a device on one for years. GKI has one new kernel per Android release
+    (`android17-6.18`) and a device keeps its launch branch; ChromeOS fixes a board's kernel at
+    bring-up and uprevs older boards every couple of years (2 versions in the field, 1 in
+    development, Kernel Summit 2021). Checked Oct 2026:
+    - ChromeOS kernel branches (`chromiumos/third_party/kernel`, 18 in 16 years): 2.6, 3.0, 3.2,
+      3.4, 3.8, 3.10, 3.14, 3.18, 4.4, 4.12, 4.14, 4.19, 5.4, 5.10, 5.15, 6.1, 6.6, 6.12.
+    - Intel Chromebooks, current kernel per board (`board-overlays`, board → baseboard → chipset
+      chain) plus older boards (cros-names): 3.8 Sandy Bridge/Haswell · 3.14 Broadwell · 3.18
+      Braswell/Skylake · 4.4 Bay Trail/Apollo Lake (then) · 4.19 Whiskey Lake · 5.4 Kaby Lake,
+      Jasper Lake, Tiger Lake · 5.10 Apollo Lake, Kaby Lake, Raptor Lake (brask) · 5.15 Comet
+      Lake, Gemini Lake, Alder Lake-N · 6.1 Meteor Lake · 6.6 Alder/Raptor Lake (brya), Kaby Lake
+      (eve). About 11 series across all Intel Chromebooks; 6.12 only for ChromeOS Flex.
+    - Googlebooks: 6.18 (`android17-6.18`) in the "ruby" image; other models unverified, but an
+      Android 17 launch device normally gets the release's new GKI branch, i.e. the same one.
+    So a new folder is expected about once per Android release (or new hardware generation),
+    while point releases come every image update and must not need one.
+  - *Series in between, floor rule:* for a kernel with no folder of its own take the highest
+    series ≤ it (6.20 → `6.18/`): patches written for an older base only miss newer changes,
+    while a newer folder may rely on code that kernel doesn't have yet. Rare (GKI series are LTS).
+  - *Patches already upstream:* before applying, try the patch in reverse (`patch -R
+    --dry-run`); if that succeeds the source already has it → skip and log.
+  - Anything that neither applies nor is already present still stops the build (as now).
+  The same scheme fits `gfx/mesa-patches` keyed on `MESA_VER` (which we choose, not the image).
+
 ### 3. Module packs (`--modules dir`)
 Directory of `.ko` + `modules.load` (+ `modules.dep`). Added to the first-stage ramdisk, loaded
 by Android's first-stage init before `super` is mounted (storage/GPU drivers). Made with

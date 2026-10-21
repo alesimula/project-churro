@@ -291,12 +291,24 @@ adding a second value after it.
 stack sets `ro.hardware.vulkan=none` unless `androidboot.churro.vulkan` is given. Google's USB
 camera HAL panics without a Vulkan device (`desktop_camera_common::gpu::vulkan::is_supported`:
 `no Vulkan physical device`, it panics instead of returning false), and Chrome 155 gives up
-on the GL-only path (`GPU process isn't usable`). By generation: Gen7–8 (Ivy Bridge, Haswell,
-Broadwell) → Mesa `hasvk`, already built (`gfx/build-mesa.sh`) but only installed with
-`CHURRO_MESA_VULKAN=intel_hasvk` and never selected; Gen9–11 (Skylake..Ice Lake) → ANV
-(`intel`, not built yet; or try Google's own ANV on our i915); Gen12+ already has Google's ANV.
-Plan: install hasvk (+ ANV) by default and pick `ro.hardware.vulkan` by PCI ID in GRUB like
-`gfx`. Unknown: hasvk's AHardwareBuffer/Android support level (NVK needed a patch).
+on the GL-only path (`GPU process isn't usable`). Done (camera works on the T300FA): `gfx-mesa` always
+installs Mesa's `hasvk` and writes its GPU IDs (Mesa's tables: ivb/byt/hsw/bdw/chv, 93 IDs);
+GRUB adds `androidboot.churro.vulkan=intel_hasvk` for those (Gen7–8: Ivy Bridge, Haswell,
+Broadwell) and `=intel` (the image's own ANV, Mesa 26.1.3, has the Skylake+ tables and the i915
+backend) for the other pre-Gen12 Intel GPUs (Gen9–11: Skylake..Ice Lake, untested: no such
+machine here); Gen12+ keeps Google's stack. hasvk has AHardwareBuffer support built in (unlike
+NVK upstream). On Haswell Mesa logs "Haswell Vulkan support is incomplete". T300FA result:
+Vulkan found, but hasvk reports Vulkan 1.1 on Android (strict mode) and the camera HAL needs
+1.2+ → `gfx/mesa-patches/hasvk-android-api-version.patch` (1.3 on Gen8, 1.2 on Gen7, as on
+Linux) → camera streams. Still open: Chrome on ANGLE-Vulkan restarts its GPU process
+(`CreateSharedImage: could not create backing` → context lost; 15× in 40 min with 1.3, 111× in
+10 min with 1.1), not tied to GPU hangs; which buffer fails isn't logged.
+
+**`timberslide` crash loop on every PC** (docs/02): the ChromeOS EC log daemon
+(`/system/etc/init/timberslide.rc`, `class core`) exits at once without an EC and restarts every
+~5 s; as an updatable process each crash runs `flags_health_check`, which resets
+server-configurable flags (hundreds of times per session), and apexd tries reverts. Fix: drop
+the rc from system (it only reads the EC console log).
 
 **Bluetooth headset (HFP) audio: SCO packet size mismatch** (T300FA, AR3012). With `bt_wbs=on`
 the stack expects 60-byte SCO packets (mSBC), the controller sends 72 (CVSD over USB alt

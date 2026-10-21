@@ -1,4 +1,6 @@
-# Mesa GL for SurfaceFlinger/HWUI; Vulkan only if a Mesa Vulkan driver is requested
+# Mesa GL for SurfaceFlinger/HWUI. Vulkan for apps (camera HAL, Chrome): the boot menu passes
+# androidboot.churro.vulkan by GPU (intel_hasvk for Intel Gen7-8, intel = the image's ANV for
+# Gen9-11), none otherwise.
 on early-init
     setprop ro.hardware.egl mesa
     setprop ro.hardware.vulkan ${ro.boot.churro.vulkan:-none}

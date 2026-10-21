@@ -103,6 +103,7 @@ cmd_build() {
     vbmeta_disable "$(part vbmeta_a)"
     export CHURRO_KERNEL=$kdir   # for features adding our kernel's modules (gpu-nouveau)
     export CHURRO_XE_IDS=$W/xe-ids   # drivers-extra: GPU IDs the image's xe binds -> boot menu
+    export CHURRO_HASVK_IDS=$W/hasvk-ids   # gfx-mesa: Intel Gen7-8 GPU IDs (Vulkan: hasvk) -> boot menu
     # vendor_dlkm first: firmware-extra (a vendor feature) reads the module list from it
     for p in vendor_dlkm vendor system system_ext product odm; do
       mp=/$p; [ "$p" = system ] && mp=/   # system-as-root

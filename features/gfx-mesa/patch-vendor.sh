@@ -14,12 +14,22 @@ put() { install -D -m 0644 -o root -g root "$1" "$2"; setfattr -n security.selin
 mkdir -p "$V/lib64/egl"; setfattr -n security.selinux -v u:object_r:vendor_file:s0 "$V/lib64/egl"
 for f in "$L"/libEGL_mesa.so "$L"/libGLESv1_CM_mesa.so "$L"/libGLESv2_mesa.so; do
   [ -f "$f" ] && put "$f" "$V/lib64/egl/$(basename "$f")"; done
-# Vulkan drivers are big (~20 MB each): NVK (GL on NVIDIA Turing+ is Zink on top of it) + the
-# requested ones (CHURRO_MESA_VULKAN="radeon intel_hasvk")
+# Vulkan drivers are big (~20 MB each): NVK (GL on NVIDIA Kepler+ is Zink on top of it), hasvk
+# (Intel Gen7-8: Ivy Bridge, Haswell, Broadwell; Google's camera HAL and Chrome need Vulkan) +
+# the requested ones (CHURRO_MESA_VULKAN="radeon")
 vks=()
-for vk in nouveau ${CHURRO_MESA_VULKAN:-}; do
+for vk in nouveau intel_hasvk ${CHURRO_MESA_VULKAN:-}; do
   [ -f "$L/libvulkan_$vk.so" ] && put "$L/libvulkan_$vk.so" "$V/lib64/hw/vulkan.$vk.so" && vks+=("$V/lib64/hw/vulkan.$vk.so")
 done
+# hasvk's GPUs for the boot menu (lib/esp.sh picks ro.hardware.vulkan by device ID): Mesa's own
+# PCI ID tables, platforms ivb/byt/hsw (Gen7/7.5) and bdw/chv (Gen8).
+. "$(dirname "$0")/../../versions.env"
+P=$(dirname "$M")/mesa-$MESA_VER/include/pci_ids
+if [ -n "${CHURRO_HASVK_IDS:-}" ]; then
+  sed -nE 's/^CHIPSET\(0x0*([0-9a-fA-F]+), *(ivb|byt|hsw|bdw|chv)[_,].*/\1/p' "$P"/crocus_pci_ids.h "$P"/iris_pci_ids.h > "$CHURRO_HASVK_IDS"
+  [ -s "$CHURRO_HASVK_IDS" ] || { echo "no hasvk GPU IDs in $P" >&2; exit 1; }
+  echo "   vendor: Vulkan hasvk for $(wc -l < "$CHURRO_HASVK_IDS") Intel Gen7-8 GPU IDs"
+fi
 
 # 2. their non-platform dependencies (libgallium-*.so, libdrm_amdgpu.so, ...), closure
 todo=("$V"/lib64/egl/*_mesa.so "${vks[@]}"); added=""

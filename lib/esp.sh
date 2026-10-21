@@ -40,6 +40,14 @@ EOF
     xesel="setpci -s 00:02.0 -v igpudev DEVICE_ID
 if [ \"\$igpu\" = \"8086\" ]; then if regexp '^0*($xere)\$' \"\$igpudev\"; then set gfx=native; else set gfx=mesa; fi; fi"
   fi
+  # Vulkan for the Intel GPUs on Mesa (pre-Gen12): Mesa's hasvk for Gen7-8 (Ivy Bridge, Haswell,
+  # Broadwell; IDs from gfx-mesa), else the image's own ANV, which also runs on i915 (Gen9-11).
+  # Google's camera HAL and Chrome need Vulkan.
+  local vksel=""
+  if [ -n "$xesel" ] && [ -s "${CHURRO_HASVK_IDS:-}" ]; then
+    local hre; hre=$({ tr 'A-F' 'a-f' < "$CHURRO_HASVK_IDS"; tr 'a-f' 'A-F' < "$CHURRO_HASVK_IDS"; } | sort -u | paste -sd'|')
+    vksel="if [ \"\$gfx\" = mesa ]; then if regexp '^0*($hre)\$' \"\$igpudev\"; then set vk=intel_hasvk; else set vk=intel; fi; set vk=\"androidboot.churro.vulkan=\$vk\"; fi"
+  fi
   cat > "$mnt/churro/grub.cfg" <<EOF
 # Project Churro boot menu. Kernel cmdline = Googlebook vendor_boot cmdline + Churro additions.
 set timeout=5
@@ -64,10 +72,12 @@ if [ "\$nvclass" = "300" -o "\$nvclass" = "302" -o "\$nvclass" = "0300" -o "\$nv
 setpci -s 00:02.0 -v igpu VENDOR_ID
 if [ "\$igpu" = "8086" ]; then set gfx=native; fi
 $xesel
-set gfx="androidboot.churro.gfx=\$gfx"
+set vk=""
+$vksel
+set gfx="androidboot.churro.gfx=\$gfx \$vk"
 # A submenu opens a new GRUB context that only sees exported variables: without this, the
 # "Graphics: other stacks" entries boot with an empty cmdline (no vendor args) and reboot at once.
-export base dbg extra_args
+export base dbg extra_args vk
 
 menuentry "Googlebook OS (Churro)" {
   linux (\$root)/churro/kernel \$base \$extra_args \$gfx
@@ -93,7 +103,7 @@ submenu "Graphics: other stacks" {
     initrd (\$root)/churro/initrd.img
   }
   menuentry "Mesa (older Intel iris/crocus, AMD, virgl)" {
-    linux (\$root)/churro/kernel \$base androidboot.churro.gfx=mesa \$extra_args
+    linux (\$root)/churro/kernel \$base androidboot.churro.gfx=mesa \$extra_args \$vk
     initrd (\$root)/churro/initrd.img
   }
   menuentry "Mesa software rendering (slow, any GPU)" {
@@ -105,7 +115,7 @@ submenu "Graphics: other stacks" {
     initrd (\$root)/churro/initrd.img
   }
   menuentry "Mesa - debug" {
-    linux (\$root)/churro/kernel \$base androidboot.churro.gfx=mesa \$dbg \$extra_args
+    linux (\$root)/churro/kernel \$base androidboot.churro.gfx=mesa \$dbg \$extra_args \$vk
     initrd (\$root)/churro/initrd.img
   }
   menuentry "Googlebook native - debug" {
