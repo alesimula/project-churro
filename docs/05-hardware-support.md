@@ -287,6 +287,26 @@ adding a second value after it.
 
 ## Known gaps (to implement)
 
+**No Vulkan on pre-Gen12 Intel → camera HAL and Chrome fail** (T300FA, docs/02). The `mesa`
+stack sets `ro.hardware.vulkan=none` unless `androidboot.churro.vulkan` is given. Google's USB
+camera HAL panics without a Vulkan device (`desktop_camera_common::gpu::vulkan::is_supported`:
+`no Vulkan physical device`, it panics instead of returning false), and Chrome 155 gives up
+on the GL-only path (`GPU process isn't usable`). By generation: Gen7–8 (Ivy Bridge, Haswell,
+Broadwell) → Mesa `hasvk`, already built (`gfx/build-mesa.sh`) but only installed with
+`CHURRO_MESA_VULKAN=intel_hasvk` and never selected; Gen9–11 (Skylake..Ice Lake) → ANV
+(`intel`, not built yet; or try Google's own ANV on our i915); Gen12+ already has Google's ANV.
+Plan: install hasvk (+ ANV) by default and pick `ro.hardware.vulkan` by PCI ID in GRUB like
+`gfx`. Unknown: hasvk's AHardwareBuffer/Android support level (NVK needed a patch).
+
+**Bluetooth headset (HFP) audio: SCO packet size mismatch** (T300FA, AR3012). With `bt_wbs=on`
+the stack expects 60-byte SCO packets (mSBC), the controller sends 72 (CVSD over USB alt
+setting 3): every packet dropped (3520 in one call), and closing SCO preceded one controller
+`Hardware Error 0x35`. Music (A2DP) not affected. Likely fix: no wideband speech for controllers
+without the mSBC USB alt setting (per-controller quirk); to check after btcoex.
+
+**Rebuild `libz.so`** — see "To do: rebuild `libz.so`" above; on the T300FA it is most of the
+boot time (boot animation: ~110 M `vpdpwssd` traps in ~70 s).
+
 **APEX updates vs. the BoringSSL bind mounts** (`churro-apex-crypto.rc`). The mounts target
 `/apex/<name>/lib64/...`, i.e. whatever version of the module is active. If a Google Play system
 update installs a newer Conscrypt/Tethering/Wi-Fi/... APEX, our library (built for the image's

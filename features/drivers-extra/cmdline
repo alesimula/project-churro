@@ -1,0 +1,4 @@
+# Atheros Wi-Fi + Bluetooth combo cards (AR9565/AR3012 "WB335", ...): coexistence off by default
+# lets Bluetooth audio and Wi-Fi collide (Wi-Fi drops, BT controller "Hardware Error 0x35").
+# Only read by ath9k; no effect elsewhere.
+ath9k.btcoex_enable=1
