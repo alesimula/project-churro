@@ -170,7 +170,9 @@ files get a sibling's label or an explicit one.
   (`nvme[1-9]`, `mmc_host`: on a PC that is Windows' disk; only `usb` stays), and
   `fwupd` + its boot-time blocking update script + cabinets (it runs at *every* boot with
   `ApprovalRequired=false` against the public LVFS and Googlebook peripheral cabinets: on a PC it
-  could reflash SSDs, USB hubs, cameras, docks, Thunderbolt controllers). Independently,
+  could reflash SSDs, USB hubs, cameras, docks, Thunderbolt controllers). Also (not safety, EC
+  housekeeping): `patch-system.sh` drops `timberslide.rc`, the ChromeOS EC log reader, which
+  crash-loops without an EC and resets server flags on every crash. Independently,
   `churro.sh` always strips `spi-intel.writeable=1` / `ignore_protection_status=1` and blacklists
   the SPI flash drivers (`spi_intel`, `spi_intel_pci`) and the TPM drivers (`tpm`, `tpm_tis*`,
   `tpm_crb`): the image's `gscutil` and `check_tpm_clear` send Google-security-chip commands to
