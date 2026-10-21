@@ -2,7 +2,7 @@
 # Build Mesa for Android x86_64 with the NDK (no AOSP tree needed: -Dandroid-stub=true).
 # Gives Churro GPU support the Googlebook vendor image lacks:
 #   GL/GLES (ro.hardware.egl=mesa): iris (Intel Gen8+, e.g. Broadwell HD 5300), crocus (Gen4-7),
-#     nouveau (NVIDIA up to Ada), zink (GL on Vulkan: NVIDIA Turing+ on NVK), virgl (QEMU
+#     nouveau (NVIDIA up to Ada), zink (GL on Vulkan: NVIDIA Kepler+ on NVK), virgl (QEMU
 #     virtio-gpu-gl), softpipe (software, any GPU)
 #   Vulkan (ro.hardware.vulkan=...): nouveau (NVK, NVIDIA Kepler+), intel_hasvk (Gen7/8), radeon (AMD)
 # NVK is partly Rust: rustc/cargo (with the x86_64-linux-android std, built panic=abort like all

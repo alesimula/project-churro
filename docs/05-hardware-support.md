@@ -231,7 +231,7 @@ older CPUs unsupported.
 | Intel iGPU / Arc (Gen12+) | image's own `xe` + `firmware-extra` (GuC/HuC/GSC/DMC from linux-firmware); default graphics = Google's stack (ANGLE on ANV); hwcomposer color pipeline off; allocator rebuilt (`gfx-minigbm`): any Xe GPU, by graphics IP version | — (Arrow Lake verified on the MSI) |
 | Intel pre-Gen12 | our `i915` via `drivers-extra` (vendor_dlkm, linked to Google's `drm_display_helper`; aliases minus the 139 IDs `xe.ko` binds, so it only loads where `xe` can't) + Mesa `iris`/`crocus`; boot menu picks `mesa` for them | needs the `#UD` emulator (Haswell…Ice Lake CPUs). Gen4–8 primary planes have no alpha formats → `i915-gen4-primary-alpha.patch` (ARGB/ABGR scanned out as X formats, else the desktop is black). T300FA: setup renders, desktop fix to verify |
 | AMD | amdgpu module + firmware (distro module set); no userspace yet | Mesa radeonsi/radv + allocator backend + GRUB detection |
-| NVIDIA | `gpu-nouveau` (below): nouveau display + GSP firmware + allocator with VRAM buffers; GL = Zink on NVK (Turing+) or nouveau GL (older), Vulkan = NVK; only where nothing else drives the display | MSI discrete mode (RTX 5070 Ti, GB205) works: panel + HDMI, Chrome (NVK AHB patch); hybrid machines: NVIDIA unused (HDMI wired to it stays dark) → reverse PRIME / render offload |
+| NVIDIA | `gpu-nouveau` (below): nouveau display + GSP firmware + allocator with VRAM buffers; GL = Zink on NVK (Kepler+) or nouveau GL (older), Vulkan = NVK; only where nothing else drives the display | MSI discrete mode (RTX 5070 Ti, GB205) works: panel + HDMI, Chrome (NVK AHB patch); hybrid machines: NVIDIA unused (HDMI wired to it stays dark) → reverse PRIME / render offload |
 | No usable GPU | no UI: no allocator backend for simpledrm/vgem, and Mesa's software path needs llvmpipe (LLVM) to import buffers | fallback allocator backend + llvmpipe |
 | VMs (QEMU) | virtio-gpu in the `gpu` pack; vgem loaded by `gfx-soft.rc` (not on machines with a GPU: it would take renderD128) | — |
 
@@ -304,11 +304,21 @@ GrBackendTexture` → SIGABRT in RenderThread). Around them the software H.264 d
 Cause (from Mesa's source): decoder output is multi-planar YUV, one BO with the chroma plane at
 an offset; Mesa imports each plane as a dma-buf with that offset, and nouveau GL's
 `nouveau_screen_bo_from_handle()` rejects any offset ≠ 0. Android's EGL path then returns
-`EGL_NO_IMAGE` without setting an error, hence `0x3000` (`EGL_SUCCESS`). **Fix (to verify on the
-G20AJ):** `gfx/mesa-patches/nouveau-import-plane-offset.patch`: import the BO at offset 0 and
+`EGL_NO_IMAGE` without setting an error, hence `0x3000` (`EGL_SUCCESS`). **Fix (confirmed on the
+G20AJ; now only used on Fermi and older, the rest runs Zink):** `gfx/mesa-patches/nouveau-import-plane-offset.patch`: import the BO at offset 0 and
 point the resource at the plane (`address`/`offset`, which texturing, render targets, transfers
 and the 2D engine already honour). nvc0 (Fermi-Ampere) only; Tesla's 2D path not adjusted. Zink
-on NVK (Turing+) is not affected (Vulkan takes plane offsets).
+on NVK is not affected (Vulkan takes plane offsets).
+
+**Fruit Ninja freezes the UI on the G20AJ (GM204, nouveau GL).** The app's HWUI channel takes a
+copy-engine fault `UNSUPPORTED_KIND` (writing a buffer whose memory kind the engine can't handle),
+the kernel kills it, SurfaceFlinger's channel faults right after on a missing page (the dead
+app's buffer) → whole screen frozen. Another run: SIGSEGV in Mesa nouveau under Unity's draw
+calls. Ruled out by experiment: compression (faults continued with it off in nvc0) and VRAM
+pressure (no buffer ever left VRAM, per a temporary eviction log); faults also hit Play Store,
+GMS's WebView and Gboard. **Fixed** by GL through Zink on NVK instead of nouveau GL: zero faults,
+game runs (`gfx/mesa-patches/nouveau-zink-from-kepler.patch`, Kepler and newer). Remaining app
+closes in that test were Google Play services' module updates (docs/02), not GPU problems.
 
 **Hardware video decoding (Intel, `native`): every decode failed.** VivoBook (Tiger Lake, xe):
 YouTube in Firefox loads forever, Reddit videos don't play, Camera can record but not play back.
@@ -459,7 +469,10 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   linear, pitch aligned to 256, VRAM (may spill to system memory) for anything the GPU or display
   touches, system memory for CPU-only buffers.
 - **Rendering** (`gfx-nouveau.rc`): `ro.hardware.egl=mesa` - Mesa's loader picks Zink on NVK for
-  Turing and newer (the only option from Blackwell on) and nouveau GL for older chips;
+  Kepler and newer (`gfx/mesa-patches/nouveau-zink-from-kepler.patch`; upstream only from Turing,
+  the only option from Blackwell on) and nouveau GL for Fermi and older (no NVK there): nouveau GL
+  faulted across apps on the G20AJ's Maxwell, Zink on NVK ran clean (docs/02). Override:
+  `debug.mesa.nouveau.use.zink=true/false`;
   `ro.hardware.vulkan=nouveau` (NVK) for apps. NVK has no AHardwareBuffer support upstream;
   `gfx/mesa-patches/nvk-android-hardware-buffer.patch` adds it (Chrome's ANGLE-on-Vulkan needs
   it). SurfaceFlinger and HWUI stay on GL for now (Skia's Vulkan backends are the next step). Mesa is built with NVK
