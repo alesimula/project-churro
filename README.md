@@ -125,7 +125,7 @@ from source.
 | `churro.sh` | `auto` / `build` / `install` |
 | `versions.env` | every pinned version the build downloads (kernel driver config, firmware, Mesa, NDK, emulator image, BoringSSL, tools), one section each |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
-| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `debug-log` (all default), `security-trusty-vm` (experimental) |
+| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `libs-generic`, `setup-no-ota`, `debug-log` (all default), `security-trusty-vm` (experimental) |
 | `crypto/` | BoringSSL builds for Android (`build-boringssl.sh` platform copy, `build-boringssl-httpengine.sh` HttpEngine's) |
 | `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`, `patches/` incl. the `vex-emulate` instruction emulator), out-of-tree pack builds |
 | `gfx/` | Mesa and minigbm (graphics allocator) builds for Android |

@@ -7,7 +7,7 @@ emu_part() {
   D=$C/emu-$p
   [ -f "$D/.done" ] && { echo "$D"; return 0; }
   mkdir -p "$C"; Z=$C/$(basename "$CHURRO_EMU_URL")
-  [ -f "$Z" ] && echo "$CHURRO_EMU_SHA1  $Z" | sha1sum -c --quiet 2>/dev/null ||
+  [ -f "$Z" ] && echo "$CHURRO_EMU_SHA1  $Z" | sha1sum -c --quiet >/dev/null 2>&1 ||
     { echo "   downloading $(basename "$Z") (~2.2 GB, once)" >&2; curl -fL# -o "$Z" "$CHURRO_EMU_URL" >&2; }
   echo "$CHURRO_EMU_SHA1  $Z" | sha1sum -c --quiet >&2
   T=$(mktemp -d); rm -rf "$D"; mkdir -p "$D"

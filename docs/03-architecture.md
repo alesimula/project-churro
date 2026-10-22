@@ -282,6 +282,17 @@ files get a sibling's label or an explicit one.
   libs-generic keeps everything and `security-software` stops the build. Written in place
   (labels kept). Why not a source rebuild like BoringSSL: bionic can only be built inside AOSP,
   and the donor is Google's own build of the same release (docs/05).
+* `setup-no-ota` (default) — when checkin says Google's OTA is required (`update_required_setup`),
+  setup makes it mandatory, and on Churro it can never install (modified partitions, no
+  `update_engine`), so setup was stuck at "Something went wrong". A static resource overlay
+  (`/system_ext/overlay/ChurroSetupNoOta.apk`) replaces the Googlebook setup app's flow scripts:
+  plain-text raw resources, taken from the image being converted, with only the `ota_available`
+  result changed from `ota_update` to `early_update` (what Google's own QR/NFC provisioning flows
+  already do). Built with Google's build-tools (aapt2, zipalign, apksigner; `versions.env`) and
+  `framework-res.apk` from the emulator image, signed with a throwaway key generated per build.
+  Listed as enabled (default mutable: immutable entries must precede mutable ones) in `overlay/config/config.xml` when the partition has one (an
+  unlisted overlay there stays disabled, `isStatic` notwithstanding). If the setup app limits
+  overlays, or no script has the step, nothing is added.
 * `crypto-generic` (default) — BoringSSL (`libcrypto.so`, `libssl.so` in `/system/lib64` and
   `/vendor/lib64`) rebuilt by `crypto/build-boringssl.sh` from the upstream commit the image's
   exports pin, with Android's build options but `-march=x86-64-v3` instead of `pantherlake`, so
