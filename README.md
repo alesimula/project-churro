@@ -10,6 +10,33 @@ of redistributing a ported one (same idea as Project Croissant / chromefy for Ch
 > an in-kernel emulator for the newer CPU instructions the image is compiled for — slower there.
 > CPU floor: Haswell (AVX2). See [`docs/`](docs/) and the hardware matrix in docs/05.
 
+## Getting the recovery image
+
+Download the official recovery image of a Googlebook from
+[aluminium-os.com/googlebookos](https://aluminium-os.com/googlebookos/) (lists every model and
+build) and unzip it: the `recovery.zip` (~7.8 GB) contains
+`android-desktop_signed_recovery_image.bin` (~19 GB). Churro is developed on the Lenovo Googlebook
+15 (`ruby`); other models are untested. Direct links and Google's own catalog (for scripts):
+[docs/07-updates.md](docs/07-updates.md#getting-a-recovery-image).
+
+## Checking updates for the recovery image
+
+Google's on-device updater is disabled (it can't apply updates to a converted system). Instead,
+update the **clean recovery image** (the one you downloaded, not converted by Churro) on the PC:
+the result is a **new clean recovery image** of the newer build, which you then convert as usual.
+
+```bash
+tools/updater/ota-check.sh android-desktop_signed_recovery_image.bin        # update available?
+tools/updater/ota-update.sh android-desktop_signed_recovery_image.bin \
+    --bin out/android-desktop_signed_recovery_image-NEWNAME.bin                # apply it (new file)
+sudo ./churro.sh auto out/android-desktop_signed_recovery_image-NEWNAME.bin churro.img        # Creating patched Churro image from updated image
+```
+
+`ota-check.sh` asks Google which update it offers that build (exit 1 if none); `ota-update.sh`
+downloads that update (a small delta) and applies it to a copy of the image with Google's own
+update code, checking every partition, without touching the original. Details and limits:
+[docs/07-updates.md](docs/07-updates.md).
+
 ## Quick start
 
 Linux or WSL2, as root, ~100 GB free (kernel + Mesa builds). On Debian/Ubuntu (tested: 24.04) every
@@ -100,5 +127,5 @@ from source.
 | `crypto/` | BoringSSL builds for Android (`build-boringssl.sh` platform copy, `build-boringssl-httpengine.sh` HttpEngine's) |
 | `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`, `patches/` incl. the `vex-emulate` instruction emulator), out-of-tree pack builds |
 | `gfx/` | Mesa and minigbm (graphics allocator) builds for Android |
-| `tools/` | `prepare.sh` (fetch + build everything), module packs, QEMU helpers, `vexemu/` + `vextest/` (emulator source and tests), dev helpers |
+| `tools/` | `prepare.sh` (fetch + build everything), `updater/` (check for and apply Google's updates to the recovery image), module packs, QEMU helpers, `vexemu/` + `vextest/` (emulator source and tests), dev helpers |
 | `docs/` | analysis, bring-up log, architecture, device notes; `docs/notes/` = scratch |
