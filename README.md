@@ -29,6 +29,8 @@ the result is a **new clean recovery image** of the newer build, which you then 
 tools/updater/ota-check.sh android-desktop_signed_recovery_image.bin        # update available?
 tools/updater/ota-update.sh android-desktop_signed_recovery_image.bin \
     --bin out/android-desktop_signed_recovery_image-NEWNAME.bin                # apply it (new file)
+# The command below is the actual churro execution for creating the generic image, also explained further in the below chapters
+# The resulting generic image created can never be OTA updated, it must be recreated from an updated clean original image
 sudo ./churro.sh auto out/android-desktop_signed_recovery_image-NEWNAME.bin churro.img        # Creating patched Churro image from updated image
 ```
 
