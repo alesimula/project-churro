@@ -9,8 +9,7 @@
 set -euo pipefail
 V=$1
 CACHE=${CHURRO_CACHE:-/var/cache/churro}
-. "$(dirname "$0")/../../versions.env"
-EMU_URL=$CHURRO_EMU_URL EMU_SHA1=$CHURRO_EMU_SHA1
+. "$(dirname "$0")/../../versions.env"   # CHURRO_EMU_URL/SHA1 (lib/emu-image.sh)
 
 for n in android.hardware.gatekeeper-service.trusty android.hardware.security.secretkeeper.trusty \
          android.hardware.security.secretkeeper.trusty.desktop android.hardware.weaver-service.android-desktop \
@@ -25,17 +24,11 @@ rm -f "$V/apex/com.google.android.hardware.biometrics.face.apex" \
       "$V/etc/vintf/manifest/com.android.desktop.power.charge_control.xml"
 echo "   vendor: Trusty/GSC HALs, face HAL, EC charge control removed"
 
-# --- fetch + unpack the emulator vendor partition once (cached) ---
-E=$CACHE/emu-vendor
-if [ ! -f "$E/.done" ]; then
-  mkdir -p "$CACHE"; Z=$CACHE/$(basename "$EMU_URL")
-  [ -f "$Z" ] && echo "$EMU_SHA1  $Z" | sha1sum -c --quiet 2>/dev/null || { echo "   downloading $(basename "$Z") (~2.2 GB, once)"; curl -fL# -o "$Z" "$EMU_URL"; }
-  echo "$EMU_SHA1  $Z" | sha1sum -c --quiet
-  T=$(mktemp -d); unzip -q -o "$Z" '*/vendor.img' -d "$T"
-  L=$(losetup -f --show -r -P "$(find "$T" -name vendor.img)"); sleep 1
-  rm -rf "$E"; mkdir -p "$E"; debugfs -R "rdump / $E" "${L}p1" >/dev/null 2>&1; losetup -d "$L"; rm -rf "$T"
-  touch "$E/.done"
-fi
+# --- the emulator vendor partition (downloaded + unpacked once, lib/emu-image.sh) ---
+. "$(dirname "$0")/../../lib/emu-image.sh"
+E=$(emu_part vendor)
+# KeyMint is required (no keystore = no boot), so another release stops the build
+emu_same_api "$V/build.prop" "$E/build.prop" || exit 1
 
 # --- install KeyMint + its missing libraries (dependency closure) ---
 lbl() { setfattr -n security.selinux -v "$2" "$1"; }

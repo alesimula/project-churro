@@ -183,16 +183,36 @@ fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup s
   first: add the faulting address's mapped file (VMA file name) to the emulator's ratelimited trap
   line, which also locates the `vpdpwssd` hot spots below.
 
-**To do: rebuild `libz.so` (zlib).** After 2a/2b, `vpdpwssd` is 99 % of the remaining traps on the
-G20AJ (296 M in 12.5 min), and the trap lines put most of it in `libz.so` (sampled lines: 289 on
-`dm-0` + 49 on `dm-2`; next: `libcodec2_soft_avcdec.so` 50, `libicing_anywhere.so` 13): zlib's
-checksums (Adler-32/CRC) compiled for Panther Lake, hit by every download, APK unpack and
-inflate. zlib has a small, stable C API, so it can be rebuilt for x86-64-v3 like BoringSSL
-(same source as the image: AOSP `external/zlib`, Chromium's zlib fork), checked against the
-image's exports and installed in place (+ bind mounts for any APEX copies). First: find every
-`libz.so` copy (system, vendor, APEXes) and which partitions `dm-0`/`dm-2` are.
+**`libz.so` and bionic (libc, libm, linker) from the emulator image (`libs-generic`, confirmed on
+hardware: G20AJ + T300FA).** After 2a/2b, `vpdpwssd` was 99 % of the remaining traps on the G20AJ
+(296 M in 12.5 min), mostly `libz.so` (zlib's Adler-32/CRC); on the T300FA the top sources were
+bionic `libc.so` (GFNI, 2570 sampled lines in 40 min), `libz.so` (699), `libart` (435),
+`linker64` (375). Instead of a source rebuild, Google's x86_64 emulator image of the same Android
+release (already downloaded for the software KeyMint, `lib/emu-image.sh`) donates generic
+x86-64 builds of the same files: no GFNI/VNNI/VPCLMULQDQ/AVX-512, not even AVX2. Checked per
+file at build time: every dynamic symbol (name + version) the image's file exports must be
+exported by the donor (libc 1474, libm 286, linker 29, libz 99: identical sets), and the donor
+must use no instruction a Haswell lacks; otherwise the image's file stays (logged). Copies
+handled: `/system/lib64/libz.so`, `/vendor/lib64/libz.so` (emulator vendor build), the bionic
+bootstrap set in `/system/lib64/bootstrap` + `/system/bin/bootstrap/linker64` (init and the
+processes before APEXes are mounted), and the `com.android.runtime` APEX as a whole file
+(identical `apex_manifest.pb` and file list; `libdl`/`libdl_android` are byte-identical in both
+builds; libc and the linker always come from the same build). Other `libz.so` copies: the face
+HAL APEX (removed by `security-software`) and arm64 guest copies (translator, not run natively).
+Donor build is older (CE2A.260420, userdebug) than the image (CL3B.260622): same release, same
+exports, but not the same day's source; no regressions seen on hardware (276.R4 image). Image scan (2423 x86-64 ELF
+files): 323 contain instructions Haswell lacks; static counts overstate (much is CPUID-dispatched:
+OpenVINO, libjxl's AVX-512); the trap log is the guide. Next by trap count: ART (`libart`,
+`libartbase`: Play-updatable APEX, left alone), Rust `libstd.dylib.so` (system, vendor, APEXes),
+`libhwui` (101 of the 121 affected system-partition files exist at the same path in the
+emulator image).
+Result: `libz.so`, `libc.so` and `linker64` no longer show up in the trap log. G20AJ: `vpdpwssd`
+140 M in 5.7 min → 0 in 7 min, `gf2p8affineqb` 2.2 M → 0.6 M. T300FA: `vpdpwssd` 124 M in 11 min →
+0.8 M in 31 min (left: `libicing_anywhere`), boot animation 95–106 s → 36 s, boot completed
+75–92 s → 48 s. Left on both: `gf2p8affineqb` in `libart`/`libartbase`/`libhwui`/`libstd.dylib`.
 
-**To do: `vpdpwssd` (AVX-VNNI) cost.** Biggest non-crypto trap source on gap CPUs (G20AJ: 226 M
+**`vpdpwssd` (AVX-VNNI) cost — mostly solved by `libs-generic`** (it was mainly `libz.so`: now G20AJ 0,
+T300FA 0.8 M in 31 min; notes below kept for what remains). Was the biggest non-crypto trap source on gap CPUs (G20AJ: 226 M
 in 15 min; VivoBook: 136 M per boot), compiler-generated across ~108 files (Skia/HWUI/RenderEngine
 `TextureLoadThread`, app RenderThreads, ART Profile Saver/dex2oat): not rebuildable like
 BoringSSL. First step: find the hot libraries/functions: the ratelimited trap lines now end in
@@ -317,8 +337,8 @@ setting 3): every packet dropped (3520 in one call), and closing SCO preceded on
 `Hardware Error 0x35`. Music (A2DP) not affected. Likely fix: no wideband speech for controllers
 without the mSBC USB alt setting (per-controller quirk); to check after btcoex.
 
-**Rebuild `libz.so`** — see "To do: rebuild `libz.so`" above; on the T300FA it is most of the
-boot time (boot animation: ~110 M `vpdpwssd` traps in ~70 s).
+**`libz.so` / libc traps** — fixed by `libs-generic` (above, "`libz.so` and bionic"); T300FA boot
+animation 95–106 s → 36 s. Left: GFNI in ART, `libhwui`, Rust `libstd`.
 
 **APEX updates vs. the BoringSSL bind mounts** (`churro-apex-crypto.rc`). The mounts target
 `/apex/<name>/lib64/...`, i.e. whatever version of the module is active. If a Google Play system

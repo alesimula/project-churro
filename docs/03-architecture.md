@@ -127,6 +127,18 @@ disk we booted from) and `androidboot.boot_source=external|internal`.
   - Anything that neither applies nor is already present still stops the build (as now).
   The same scheme fits `gfx/mesa-patches` keyed on `MESA_VER` (which we choose, not the image).
 
+  **Hypothetical: one script for several Android releases (17, 18, 19 …).** Read the release
+  from the image (`ro.build.version.release`/`sdk`, kernel series) and split the pins three ways:
+  - *must match, discoverable:* emulator image (newest `x86_64-<API>.0_rNN` for the image's API
+    from Google's published list), minigbm branch (`android<release>-release`), Arch config and
+    kernel patch folder (series rules above);
+  - *must match, chosen by hand:* e.g. `BORINGSSL_REV`, in a small per-release file
+    (`releases/17.env`); no file for the image's release → stop with a clear message, never
+    borrow another release's;
+  - *release-independent:* Mesa, linux-firmware, sof-bin, NDK stay global pins.
+  Release-specific edits (rc/HAL names, audio HAL details) stay manual: the "moving to a newer
+  image" checklist below.
+
 ### 3. Module packs (`--modules dir`)
 Directory of `.ko` + `modules.load` (+ `modules.dep`). Added to the first-stage ramdisk, loaded
 by Android's first-stage init before `super` is mounted (storage/GPU drivers). Made with
@@ -260,6 +272,16 @@ files get a sibling's label or an explicit one.
   gralloc0 module stay and load our libraries: they're linked against the image's own libc++
   (platform `std::__1` ABI) and the build refuses to install them unless every symbol the image's
   binaries take from Google's versions is present. Written in place (labels kept).
+* `libs-generic` (default) — `libz.so` (system, vendor) and bionic (`/system/lib64/bootstrap`,
+  `/system/bin/bootstrap/linker64`, the `com.android.runtime` APEX file) replaced by Google's
+  generic x86-64 builds of the same files from the emulator image of the same release
+  (`lib/emu-image.sh`, shared with `security-software`). Per file (`swap.sh`): the donor must
+  export every symbol+version the image's file exports and use no instruction Haswell lacks,
+  else the image's file stays; libc and linker swap together or not at all. The emulator image
+  must be the same Android release (API level from both `build.prop`s, `emu_same_api`): otherwise
+  libs-generic keeps everything and `security-software` stops the build. Written in place
+  (labels kept). Why not a source rebuild like BoringSSL: bionic can only be built inside AOSP,
+  and the donor is Google's own build of the same release (docs/05).
 * `crypto-generic` (default) — BoringSSL (`libcrypto.so`, `libssl.so` in `/system/lib64` and
   `/vendor/lib64`) rebuilt by `crypto/build-boringssl.sh` from the upstream commit the image's
   exports pin, with Android's build options but `-march=x86-64-v3` instead of `pantherlake`, so
