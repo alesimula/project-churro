@@ -1,7 +1,7 @@
 # Updates: why Google OTAs don't work, and what an update-friendly Churro would need
 
-Status: **note for the future, nothing implemented.** Until then `update_engine` should be
-disabled (open item, safety: a full OTA would put the stock vendor — flash tools, fwupd — back).
+Status: **note for the future, nothing implemented.** Until then `firmware-lockdown` disables
+`update_engine` (safety: delta OTAs fail, so Google serves a ~3 GB full OTA, seen during setup).
 
 ## Today
 | | Churro | GBRUNCH |

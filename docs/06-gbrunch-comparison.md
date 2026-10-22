@@ -108,7 +108,7 @@ kill (our `security-software` already hides it) and graphics-allocator memfd SEL
 | Idea | Effort | Notes |
 |---|---|---|
 | fstab override without `voldmanaged` nvme/mmc | small | open safety item 1 |
-| Disable `update_engine` + `update_verifier` | small | open safety item 2 |
+| Disable `update_engine` + `update_verifier` | small | `update_engine` done (`firmware-lockdown`); `update_verifier` kept (nothing to verify without OTAs) |
 | Wi-Fi PNVM + upstream `regulatory.db`/`.p7s` in `firmware-extra` | small | our log: "regulatory.db is malformed or signature is missing" → world-roaming channels; PNVM files aren't declared by modinfo, so add every `iwlwifi-*.pnvm` matching a requested ucode family |
 | SDR display props | tiny | only if colours look washed out on the MSI — ask first |
 | Hardware inventory into CHURRO-LOG | small | the debug logger could also save PCI/USB/ACPI modaliases + bound drivers: exactly what's needed to add drivers for unknown laptops (e.g. the missing touchpad pinctrl) |
