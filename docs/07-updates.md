@@ -43,6 +43,12 @@ The catalog lags behind: it still listed 271.R1 for ruby while Google was alread
 
 ## Checking for and applying updates (`tools/updater/`)
 
+No root needed. `buildinfo.sh` and `ota-update.sh` check their packages first (`lib/deps.sh`,
+profile `updater`: `gdisk curl unzip python3`, plus the erofs-utils build packages until
+`tools/bin/dump.erofs` exists) and, if some are missing, print the `sudo apt-get install …` line to
+run; as root they install them. `ota-check.sh` only needs curl/gzip/od (with a `.bin` it goes
+through `buildinfo.sh`). On other distros the list is printed and the run continues.
+
 ```bash
 tools/updater/ota-check.sh android-desktop_signed_recovery_image.bin       # is there an update?
 tools/updater/ota-update.sh android-desktop_signed_recovery_image.bin \
@@ -53,8 +59,8 @@ sudo ./churro.sh auto out/android-desktop_signed_recovery_image-276.R4.bin churr
 ### `buildinfo.sh <recovery.bin>`
 Reads the image's build properties without root (GPT → super metadata → `dump.erofs --cat` of
 product_a `/etc/build.prop`) and prints eval-safe `KEY=value` lines: `FINGERPRINT`, `MODEL`,
-`SDK`, `SECURITY_PATCH`, `DATE_UTC`, ... Needs `tools/bin/dump.erofs` (built by `tools/prepare.sh`;
-requires glibc ≥ 2.38, fine on Ubuntu 24.04/WSL).
+`SDK`, `SECURITY_PATCH`, `DATE_UTC`, ... Needs `dump.erofs` ≥ 1.8 (`--cat`; Ubuntu 24.04 ships
+1.7.1): built once into `tools/bin` on first use, or set `EROFS_BIN`.
 
 ### `ota-check.sh <recovery.bin | fingerprint> [--chain] [--html]`
 Asks Google's checkin server which update it offers that build, the same request GMS SystemUpdate
@@ -97,7 +103,7 @@ Outputs:
 Space: the new image (~19 GB, less where sparse) plus ~4 GB of temporary files (one partition's
 source + output; product is the largest). With `--bin` no `.img` files remain. Measured: 1 min
 35 s from an empty cache (36 MB delta + ~530 MB otatools downloads included), plus the time to copy
-19 GB. Needs python3, curl, unzip, sgdisk, dd, sha256sum, sha1sum.
+19 GB.
 
 Env: `CHURRO_OTA_CACHE` (cache dir), `OTATOOLS_BUILD=<ci build id>` (pin otatools; default: the
 last good build of an x86_64 phone target on `aosp-android-latest-release`), `FINGERPRINT` +
@@ -132,7 +138,10 @@ SHA-256.
 
 During setup Google's updater downloaded the delta, which failed its source check
 (`verifyPayloadMetadata()`: Churro modifies the partitions), and then got a ~3 GB full update. To
-keep that from happening `firmware-lockdown` removes `update_engine`.
+keep that from happening `firmware-lockdown` removes `update_engine`. Setup also makes such an
+update mandatory when checkin marks it required, and with no way to install it setup was stuck
+("Something went wrong"; Back, "Reset update" and "Restart now" all lead back to it): `setup-no-ota`
+sends that step on to the app updates, as Google's QR/NFC provisioning flows do (docs/03).
 
 | | Churro | GBRUNCH |
 |---|---|---|

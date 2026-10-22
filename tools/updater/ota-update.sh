@@ -29,6 +29,8 @@ done
 [ -f "$BIN" ] || { echo "usage: ota-update.sh <recovery.bin> [out_dir | --bin <new.bin>]" >&2; exit 1; }
 OUT=${OUT:-$ROOT/out/ota-update}
 CACHE=${CHURRO_OTA_CACHE:-$ROOT/out/ota-cache}
+# shellcheck source-path=SCRIPTDIR source=../../lib/deps.sh
+. "$ROOT/lib/deps.sh"; deps_ensure updater         # missing packages -> "sudo apt-get install ..."
 for t in python3 curl unzip sgdisk dd sha256sum sha1sum; do command -v "$t" >/dev/null || { echo "missing: $t" >&2; exit 1; }; done
 if [ -n "$NEW" ]; then [ ! -e "$NEW" ] || { echo "$NEW exists, not overwriting" >&2; exit 1; }; mkdir -p "$(dirname "$NEW")"; fi
 mkdir -p "$CACHE"

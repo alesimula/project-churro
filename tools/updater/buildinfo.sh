@@ -8,6 +8,8 @@
 set -euo pipefail
 IMG=${1:?usage: $0 <recovery.bin>}
 HERE=$(cd "$(dirname "$0")" && pwd)
+# shellcheck source-path=SCRIPTDIR source=../../lib/deps.sh
+. "$HERE/../../lib/deps.sh"; deps_ensure updater   # sgdisk + dump.erofs >= 1.8 (built once)
 
 u32() { od -An -tu4 -j "$1" -N4 "$IMG" | tr -d ' '; }
 u64() { od -An -tu8 -j "$1" -N8 "$IMG" | tr -d ' '; }
@@ -34,7 +36,7 @@ done
 
 DUMP=""
 for d in "${EROFS_BIN:-}" "$HERE/../bin"; do [ -n "$d" ] && [ -x "$d/dump.erofs" ] && { DUMP=$d/dump.erofs; break; }; done
-DUMP=${DUMP:-$(command -v dump.erofs)} || { echo "dump.erofs not found (run churro.sh once, or set EROFS_BIN)" >&2; exit 1; }
+DUMP=${DUMP:-$(command -v dump.erofs)} || { echo "dump.erofs not found (tools/build-erofs-utils.sh, or set EROFS_BIN)" >&2; exit 1; }
 props=$("$DUMP" --offset="$off" --cat --path=/etc/build.prop "$IMG")
 
 prop() { printf '%s\n' "$props" | sed -n "s/^$1=//p" | head -1; }
