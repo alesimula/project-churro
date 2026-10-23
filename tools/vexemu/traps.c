@@ -313,7 +313,11 @@ DEFINE_IDTENTRY(exc_overflow)
  * and Haswell also ADX (adcx/adox: BoringSSL's RSA/ECC, Rust ring), so core boot
  * binaries (incl. second-stage init, odsign) die with SIGILL and the boot
  * panics or stalls. This only runs on #UD, i.e. it is dormant on CPUs with the
- * native forms. Per-opcode trap counts are logged (ratelimited) as the
+ * native forms. VAES/VPCLMULQDQ execute natively per 128-bit lane on the operand
+ * copies when the CPU has AES-NI/PCLMULQDQ, vpdpwssd as pmaddwd+paddd (AVX2), and
+ * after a SHA-NI or AVX-VNNI instruction the handler also interprets the following
+ * allow-listed SSE/VEX code ("run-ahead"), so a loop costs ~1 trap instead of one
+ * per instruction. Per-opcode trap counts are logged (ratelimited) as the
  * hotness gauge for a possible offline rewriter. churro.vexemu=0 in
  * bootconfig disables it.
  */
@@ -418,6 +422,41 @@ static void churro_vex_vnni(u32 *d, const u32 *acc, const u32 *a, const u32 *b,
 		}
 		d[i] = r;
 	}
+}
+
+/*
+ * Native fast path for vpdpwssd: it is exactly pmaddwd (the wrapping word dot
+ * products are the VNNI arithmetic) followed by paddd, and both are AVX2 - the
+ * image's own CPU floor, so every machine that boots this image has them. Runs
+ * like the AES/CLMUL fast path, between save_fpregs_to_fpstate() and
+ * restore_fpregs_from_fpstate() under fpregs_lock(), where xmm0-2 are scratch.
+ * The C model stays for vpdpbusd(s) and the saturating forms (no native
+ * equivalent: pmaddubsw saturates per word).
+ */
+#define CHURRO_VPWSSD_MADD(d, acc, a, b)				\
+	asm volatile("movdqu %1, %%xmm0\n\t"				\
+		     "movdqu %3, %%xmm2\n\t"				\
+		     "movdqu %2, %%xmm1\n\t"				\
+		     "pmaddwd %%xmm1, %%xmm2\n\t"			\
+		     "paddd %%xmm0, %%xmm2\n\t"				\
+		     "movdqu %%xmm2, %0"				\
+		     : "=m" (*(u8 (*)[16])(d))				\
+		     : "m" (*(const u8 (*)[16])(acc)),			\
+		       "m" (*(const u8 (*)[16])(a)), "m" (*(const u8 (*)[16])(b)))
+
+static void churro_vex_vnni_exec(u32 *d, const u32 *acc, const u32 *a,
+				  const u32 *b, int lanes, int op)
+{
+	int i;
+
+	/* lanes counts dwords (4 = 128-bit, 8 = 256-bit): one native op per 16-byte chunk */
+	if (op == CHURRO_VPWSSD && boot_cpu_has(X86_FEATURE_AVX2)) {
+		for (i = 0; i < lanes / 4; i++)
+			CHURRO_VPWSSD_MADD((u8 *)d + 16 * i, (const u8 *)acc + 16 * i,
+					   (const u8 *)a + 16 * i, (const u8 *)b + 16 * i);
+		return;
+	}
+	churro_vex_vnni(d, acc, a, b, lanes, op);
 }
 
 /* vpmadd52l/huq: dst += low/high 52 bits of the 104-bit U52(a) * U52(b) */
@@ -764,16 +803,18 @@ static void churro_vex_write(struct xregs_state *xs, int n, const u32 *v, bool y
 
 /* --- run-ahead --- */
 /*
- * After an emulated legacy-SSE instruction (SHA-NI), keep interpreting the straight-line code
- * that follows instead of returning to user space. BoringSSL's SHA-256 loop (libcrypto's FIPS
- * self-check runs it in every process that loads libcrypto) is 56 SHA-NI ops per 64-byte block
- * interleaved with movdqa/movdqu/paddd/pshufd/palignr/pshufb/punpck*qdq, lea and nops: with
- * run-ahead a block costs ~1 trap instead of 56. Only that exact allow-list is interpreted;
- * anything else (stores, branches, other prefixes or VEX, a load that would fault or #GP on
- * alignment) ends the run and the CPU executes it natively, so stopping is always correct.
- * None of the allowed instructions touch EFLAGS. The run works on copies of the XMM low halves
- * (legacy SSE never writes bits 255:128) and of the GPRs (lea, addressing).
- * churro.vexemu_runahead=0 in bootconfig disables it.
+ * After an emulated instruction, keep interpreting the straight-line code that follows
+ * instead of returning to user space, so a loop costs ~1 trap instead of one per
+ * instruction. Two allow-lists: legacy SSE for the SHA-NI loops (BoringSSL's SHA-256:
+ * 56 SHA ops per 64-byte block interleaved with movdqa/movdqu/paddd/pshufd/palignr/
+ * pshufb/punpck*qdq, lea and nops - the C model on XMM low halves, after the lock) and
+ * VEX/AVX2 for the AVX-VNNI loops (the SIMD Adler-32 statically linked in
+ * libicing_anywhere.so, codecs, RenderEngine: vmovdqu/vmovdqa loads, vpxor, vpaddd,
+ * vpmaddwd, vpsadbw, vpmaddubsw and the four VNNI ops - natively on full YMM copies,
+ * inside the lock). In both, anything else (stores, branches, flag-setting ops, other
+ * prefixes, a load that would fault or #GP on alignment) ends the run and the CPU
+ * executes it natively, so stopping is always correct; none of the allowed
+ * instructions touch EFLAGS. churro.vexemu_runahead=0 in bootconfig disables it.
  */
 #define CHURRO_RA_MAX	256
 
@@ -785,7 +826,7 @@ enum churro_ra_kind {
 static bool churro_vexemu_runahead = true;
 module_param(churro_vexemu_runahead, bool, 0644);
 MODULE_PARM_DESC(churro_vexemu_runahead,
-	"After an emulated SHA-NI instruction, also interpret the following plain SSE code");
+	"After an emulated SHA-NI or AVX-VNNI instruction, also interpret the following plain SSE / VEX AVX2 code");
 
 static int __init churro_vexemu_runahead_setup(char *str)
 {
@@ -846,7 +887,7 @@ static void churro_ra_exec(u32 *d, const u32 *s, const u32 *x0, int kind, int sh
 }
 
 /* interpret the allow-listed instruction at r->ip; false = stop here (the CPU runs it) */
-static bool churro_ra_step(struct pt_regs *r, u32 (*x)[4], u16 *dirty)
+static bool churro_ra_step(struct pt_regs *r, u32 (*x)[8], u16 *dirty)
 {
 	u8 buf[MAX_INSN_SIZE], pfx = 0, imm = 0, rex;
 	int len, i, n, kind, sha_op = 0, dst;
@@ -940,7 +981,7 @@ static bool churro_ra_step(struct pt_regs *r, u32 (*x)[4], u16 *dirty)
  * x = the XMM low halves right after the trapping instruction. Interprets from regs->ip on,
  * then writes back the touched XMM registers, the GPRs and the new ip. Returns the count.
  */
-static int churro_runahead(struct pt_regs *regs, u32 (*x)[4])
+static int churro_runahead(struct pt_regs *regs, u32 (*x)[8])
 {
 	struct fpu *fpu = x86_task_fpu(current);
 	struct pt_regs r = *regs;
@@ -968,6 +1009,188 @@ static int churro_runahead(struct pt_regs *regs, u32 (*x)[4])
 	}
 	*regs = r;	/* ip, and GPRs a lea changed; nothing else touched them meanwhile */
 	atomic64_add(n, &churro_runahead_count);
+	return n;
+}
+
+/*
+ * VEX run-ahead: the same idea as above for the AVX-VNNI loops. Runs inside
+ * handle_vex_ud()'s fpregs_lock() window so the allowed instructions can execute
+ * natively on the register copies (vpdpwssd as pmaddwd+paddd, the rest as the
+ * plain AVX2 op) - which means memory operands and the instruction fetch must not
+ * fault: both use non-faulting copies, and a fault simply ends the run and the
+ * CPU faults on the real instruction instead. Works on full 32-byte copies;
+ * a VEX.128 write zeroes the upper half. Needs AVX2 + SSSE3 (the image's floor).
+ */
+enum churro_rav_kind {
+	CHURRO_RAV_MOV, CHURRO_RAV_PXOR, CHURRO_RAV_PADDD, CHURRO_RAV_PMADDWD,
+	CHURRO_RAV_PSADBW, CHURRO_RAV_PMADDUBSW, CHURRO_RAV_VNNI,
+};
+
+static bool churro_ra_vex_step(struct pt_regs *r, u32 (*x)[8], u16 *dirty)
+{
+	u8 buf[MAX_INSN_SIZE], vex1 = 0, vex2;
+	u32 a[8], b[8], saved_rex;
+	void __user *ea;
+	struct insn insn;
+	const u8 *ob;
+	unsigned long bad;
+	bool aligned = false;
+	int len, i, map, pp, kind = 0, vop = 0, s1, s2, dst, y;
+
+	pagefault_disable();
+	len = MAX_INSN_SIZE - __copy_from_user_inatomic(buf, (void __user *)r->ip,
+							MAX_INSN_SIZE);
+	pagefault_enable();
+	if (len < 1 || insn_decode(&insn, buf, len, INSN_MODE_64) ||
+	    insn.prefixes.bytes[0] || insn.immediate.nbytes)
+		return false;
+
+	if (!insn.vex_prefix.nbytes) {
+		ob = insn.opcode.bytes;
+		/* nop (90) and the multi-byte nop (0F 1F /0), lea r64, m: as above */
+		if ((insn.opcode.nbytes == 1 && ob[0] == 0x90 &&
+		     !insn.rex_prefix.nbytes) ||
+		    (insn.opcode.nbytes == 2 && ob[0] == 0x0f && ob[1] == 0x1f)) {
+			r->ip += insn.length;
+			return true;
+		}
+		if (insn.opcode.nbytes == 1 && ob[0] == 0x8d &&
+		    X86_REX_W(insn.rex_prefix.bytes[0]) &&
+		    X86_MODRM_MOD(insn.modrm.value) != 3) {
+			unsigned long *reg = insn_get_modrm_reg_ptr(&insn, r);
+
+			ea = insn_get_addr_ref(&insn, r);
+			if (ea == (void __user *)-1L || !reg)
+				return false;
+			*reg = (unsigned long)ea;
+			r->ip += insn.length;
+			return true;
+		}
+		return false;
+	}
+	if (insn.vex_prefix.nbytes == 3) {
+		vex1 = insn.vex_prefix.bytes[1];
+		vex2 = insn.vex_prefix.bytes[2];
+		map = vex1 & 0x1f;
+		dst = X86_MODRM_REG(insn.modrm.value) + (!X86_VEX_R(vex1) ? 8 : 0);
+		s2 = X86_MODRM_RM(insn.modrm.value) + (!X86_VEX_B(vex1) ? 8 : 0);
+	} else if (insn.vex_prefix.nbytes == 2) {
+		vex2 = insn.vex_prefix.bytes[1];
+		map = 1;
+		dst = X86_MODRM_REG(insn.modrm.value) + (!X86_VEX_R(vex2) ? 8 : 0);
+		s2 = X86_MODRM_RM(insn.modrm.value);
+	} else {
+		return false;
+	}
+	if (insn.opcode.nbytes != 1)
+		return false;
+	pp = vex2 & 3;
+	y = X86_VEX_L(vex2) ? 1 : 0;
+	s1 = ~X86_VEX_V(vex2) & 0xf;
+	ob = insn.opcode.bytes;
+
+	if (map == 1) {
+		/* VEX.pp: 0 = none, 1 = 66, 2 = F3, 3 = F2 */
+		if (ob[0] == 0x6f && (pp == 1 || pp == 2)) {
+			kind = CHURRO_RAV_MOV;		/* vmovdqa / vmovdqu load */
+			aligned = pp == 1;
+		} else if (ob[0] == 0xef && pp == 1) {
+			kind = CHURRO_RAV_PXOR;
+		} else if (ob[0] == 0xfe && pp == 1) {
+			kind = CHURRO_RAV_PADDD;
+		} else if (ob[0] == 0xf5 && pp == 1) {
+			kind = CHURRO_RAV_PMADDWD;	/* 0F F5 */
+		} else if (ob[0] == 0xf6 && pp == 1) {
+			kind = CHURRO_RAV_PSADBW;	/* 0F F6 */
+		} else {
+			return false;
+		}
+	} else if (map == 2) {
+		if (pp == 1 && ob[0] >= 0x50 && ob[0] <= 0x53 && !insn_vex_w_bit(&insn)) {
+			kind = CHURRO_RAV_VNNI;
+			vop = CHURRO_VPBUSD + ob[0] - 0x50;
+		} else if (ob[0] == 0x04 && pp == 1) {
+			kind = CHURRO_RAV_PMADDUBSW;	/* 0F38 04 */
+		} else {
+			return false;
+		}
+	} else {
+		return false;
+	}
+
+	memcpy(a, x[s1], y ? 32 : 16);		/* vvvv; unused by the MOV form */
+	if (X86_MODRM_MOD(insn.modrm.value) == 3) {
+		memcpy(b, x[s2], y ? 32 : 16);
+	} else {
+		/* VEX R/X/B live in the VEX bytes, not rex: see handle_vex_ud() */
+		saved_rex = insn.rex_prefix.value;
+		insn.rex_prefix.value = (!X86_VEX_R(vex1) ? 4 : 0);
+		if (insn.vex_prefix.nbytes == 3)
+			insn.rex_prefix.value |= (!X86_VEX_X(vex1) ? 2 : 0) |
+						 (!X86_VEX_B(vex1) ? 1 : 0);
+		ea = insn_get_addr_ref(&insn, r);
+		insn.rex_prefix.value = saved_rex;
+		if (ea == (void __user *)-1L ||
+		    (aligned && ((unsigned long)ea & (y ? 31 : 15))))
+			return false;	/* vmovdqa alignment: the CPU #GPs */
+		pagefault_disable();
+		bad = __copy_from_user_inatomic(b, ea, y ? 32 : 16);
+		pagefault_enable();
+		if (bad)
+			return false;	/* real hw would fault #PF: end the run */
+	}
+
+	if (kind == CHURRO_RAV_MOV) {
+		memcpy(x[dst], b, y ? 32 : 16);
+	} else {
+		/* per 128-bit lane, natively: dst = vvvv op rm (dst is the vvvv read-write) */
+		for (i = 0; i <= y; i++) {
+			u32 *d = (u32 *)((u8 *)x[dst] + 16 * i);
+			const u32 *pa = (const u32 *)((const u8 *)a + 16 * i);
+			const u32 *pb = (const u32 *)((const u8 *)b + 16 * i);
+
+			if (kind == CHURRO_RAV_VNNI)
+				churro_vex_vnni_exec(d, d, pa, pb, 4, vop);
+			else if (kind == CHURRO_RAV_PXOR)
+				CHURRO_XMM_OP2("pxor", d, pa, pb);
+			else if (kind == CHURRO_RAV_PADDD)
+				CHURRO_XMM_OP2("paddd", d, pa, pb);
+			else if (kind == CHURRO_RAV_PMADDWD)
+				CHURRO_XMM_OP2("pmaddwd", d, pa, pb);
+			else if (kind == CHURRO_RAV_PSADBW)
+				CHURRO_XMM_OP2("psadbw", d, pa, pb);
+			else
+				CHURRO_XMM_OP2("pmaddubsw", d, pa, pb);
+		}
+	}
+	if (!y)
+		memset((u8 *)x[dst] + 16, 0, 16);	/* a VEX.128 write zeroes bits 255:128 */
+	*dirty |= 1 << dst;
+	r->ip += insn.length;
+	return true;
+}
+
+/*
+ * x = full YMM copies right after the trapping instruction (regs->ip is already past
+ * it). Interprets from regs->ip on and writes the touched registers back into the
+ * saved fpstate; called inside handle_vex_ud()'s fpregs_lock() window. Returns the
+ * count of interpreted instructions (0 = nothing done).
+ */
+static int churro_runahead_vex(struct pt_regs *regs, struct xregs_state *xs, u32 (*x)[8])
+{
+	u16 dirty = 0;
+	int n = 0, i;
+
+	if (!churro_vexemu_runahead || (regs->flags & X86_EFLAGS_TF) ||
+	    !boot_cpu_has(X86_FEATURE_AVX2) || !boot_cpu_has(X86_FEATURE_SSSE3))
+		return 0;
+	while (n < CHURRO_RA_MAX && churro_ra_vex_step(regs, x, &dirty))
+		n++;
+	for (i = 0; i < 16; i++)
+		if (dirty & (1 << i))
+			churro_vex_write(xs, i, x[i], true, false);
+	if (n)
+		atomic64_add(n, &churro_runahead_count);
 	return n;
 }
 /* --- end run-ahead --- */
@@ -1064,12 +1287,12 @@ static bool handle_adx_ud(struct pt_regs *regs)
 static bool handle_vex_ud(struct pt_regs *regs)
 {
 	u8 buf[MAX_INSN_SIZE];
-	u32 va[8], vb[8], vd[8], vacc[8], ra[16][4];
+	u32 va[8], vb[8], vd[8], vacc[8], ra[16][8];
 	unsigned long tip;
 	struct insn insn;
 	struct fpu *fpu = x86_task_fpu(current);
 	struct xregs_state *xs;
-	bool legacy = false;
+	bool legacy = false, vex_run = false;
 	u32 saved_rex;
 	void __user *ea;
 	u8 vex1, vex2, imm = 0;
@@ -1086,6 +1309,7 @@ static bool handle_vex_ud(struct pt_regs *regs)
 					     MAX_INSN_SIZE);
 	if (len < 4 || insn_decode(&insn, buf, len, INSN_MODE_64))	/* sha1nexte xmm,xmm is 4 bytes */
 		return false;
+	tip = regs->ip;		/* the trapping instruction (run-ahead moves ip on) */
 
 	/* VEX: only 3-byte VEX (0xC4), 66 prefix, map 0F38 or 0F3A */
 	if (insn.vex_prefix.nbytes == 3) {
@@ -1219,17 +1443,28 @@ static bool handle_vex_ud(struct pt_regs *regs)
 		churro_vex_madd52((u64 *)vd, (u64 *)vacc, (u64 *)va, (u64 *)vb,
 				  y ? 4 : 2, op == CHURRO_VPM52HQ);
 	else
-		churro_vex_vnni(vd, vacc, va, vb, y ? 8 : 4, op);
+		churro_vex_vnni_exec(vd, vacc, va, vb, y ? 8 : 4, op);
 	churro_vex_write(xs, dst, vd, y, legacy);
-	if (legacy)	/* run-ahead input: the XMM low halves as they are now */
+	if (legacy) {
+		/* run-ahead input: the XMM low halves as they are now */
 		for (i = 0; i < 16; i++)
 			churro_vex_read(xs, i, ra[i], false);
+	} else if (op <= CHURRO_VPWSSDS) {
+		/* VEX run-ahead input: the registers as they are now (full YMM). Runs
+		 * inside the lock: the interpreter executes AVX2 natively on the copies.
+		 */
+		for (i = 0; i < 16; i++)
+			churro_vex_read(xs, i, ra[i], true);
+		regs->ip += insn.length;
+		ran = churro_runahead_vex(regs, xs, ra);
+		vex_run = true;
+	}
 
 	restore_fpregs_from_fpstate(fpu->fpstate, XFEATURE_MASK_FPSTATE);
 	fpregs_unlock();
 
-	tip = regs->ip;		/* the trapping instruction (run-ahead moves ip on) */
-	regs->ip += insn.length;
+	if (!vex_run)	/* the VEX run moved ip past the trapping instruction already */
+		regs->ip += insn.length;
 	if (legacy)
 		ran = churro_runahead(regs, ra);
 	atomic64_inc(&churro_vexemu_count[op]);

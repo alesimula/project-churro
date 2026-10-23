@@ -70,7 +70,7 @@ prefix = WRSS, rejected), dest += src + carry with the carry from/to CF (`adcx`)
 only, 32-bit forms zero-extended, register or memory source. Differential test vs. native ADX
 (kernel decoder + extracted code, 9,000 random programs / 540,000 ops: 0 mismatches; mutations
 of carry-in, 32-bit truncation, CF/OF choice, flag preservation and REX.B all caught) and
-vextest `adcx/*`, `adox/*`. No run-ahead for integer code yet: measure the trap counts first.
+vextest `adcx/*`, `adox/*`. No run-ahead for integer code yet: measure the trap counts first. Measured (G20AJ, 2026-10-23, data-kept boot with Play updating apps): 10.5-11.8 M adcx/adox traps from `libjavacore.so`'s own *statically linked* BoringSSL (APK signature verification in Java crypto) — `crypto-generic` replaces the shared libcrypto copies, not this one, so the "adcx 0" of the earlier light session was workload, not coverage. Correct, and the C path handles it; a hot session like this is the case for integer run-ahead if it ever bothers.
 
 **Run-ahead (SHA-NI cost).** First T300FA boot (Broadwell): 1.87 billion traps in 19 min, ~2.3 M/s
 sustained = the whole CPU; 93 % SHA-256, from processes like `cp`/`mv`/`log` (toybox links
@@ -84,9 +84,23 @@ CPU executes it natively: stores, branches, flag-setting ops, VEX, segment prefi
 would fault or a misaligned `movdqa` (#GP), single-stepping (`TF`); max 256 per trap. On the real
 libcrypto block it covers 55 of 56 SHA ops (stops at the loop's `dec`): ~2 traps per block
 instead of 56. `churro.vexemu_runahead=0` turns it off; the dmesg trap line shows `+N run-ahead`.
+**VEX run-ahead (AVX-VNNI loops) + native `vpdpwssd` (2026-10-22).** The same idea for VNNI loops
+(the SIMD Adler-32 statically linked in AppSearch's `libicing_anywhere.so`, codecs, RenderEngine):
+after an emulated VNNI instruction the handler interprets the following allow-listed VEX code
+(`vmovdqu/vmovdqa` loads, `vpxor`, `vpaddd`, `vpmaddwd`, `vpsadbw`, `vpmaddubsw`, the four VNNI
+ops, `lea`, nops) *inside* the `fpregs_lock()` window, executing each instruction natively on
+full 32-byte register copies — `vpdpwssd` itself as `pmaddwd`+`paddd` (AVX2 = the image's floor).
+Memory operands and the instruction fetch use non-faulting copies (`pagefault_disable()` +
+`__copy_from_user_inatomic()`), so a fault just ends the run and the CPU faults on the real
+instruction; a VEX.128 write zeroes the upper half like hardware. Stores, branches and
+flag-setting code end the run, so the loop's `inc/cmp/jne` is the natural stop: ~1 trap per
+128-byte Adler-32 iteration instead of 8. Gated on AVX2+SSSE3 and `churro.vexemu_runahead`;
+dormant on CPUs with VNNI (Alder Lake+, Zen 5, the MSI).
 Validated by a differential test (kernel decoder from `tools/` + the extracted run-ahead code vs.
 native execution of 10,000+ random allow-listed programs on Arrow Lake: 0 mismatches; mutations of
-paddd/palignr/pshufb/REX/alignment all caught) and vextest `runahead/sha-chain`. GFNI and SHA land here because
+paddd/palignr/pshufb/REX/alignment all caught) and vextest `runahead/sha-chain` +
+`runahead/vex-chain` (a two-run chain: load/shuffle/VNNI mix, a run-stopping `add`, a memory-form
+and a VEX.128 VNNI; the model is verified natively on Arrow Lake first). GFNI and SHA land here because
 `init`'s libcrypto (AES key schedule) and BoringSSL's FIPS module check (HMAC-SHA-256) run
 them unconditionally; `vpclmulqdq` likewise via AES-GCM, and `vaesenc ymm` via the FIPS
 self-test (`libcrypto.so` from second-stage `init`: SIGILL right after first stage on the
@@ -215,28 +229,38 @@ Result: `libz.so`, `libc.so` and `linker64` no longer show up in the trap log. G
 T300FA 0.8 M in 31 min; notes below kept for what remains). Was the biggest non-crypto trap source on gap CPUs (G20AJ: 226 M
 in 15 min; VivoBook: 136 M per boot), compiler-generated across ~108 files (Skia/HWUI/RenderEngine
 `TextureLoadThread`, app RenderThreads, ART Profile Saver/dex2oat): not rebuildable like
-BoringSSL. First step: find the hot libraries/functions: the ratelimited trap lines now end in
-`@ <file>(<fs id>)+0x<file offset>` (vexemu `churro_where()`; the fs id tells a bind-mounted copy
-from the APEX original), then disassemble the hot spots as was done for ADX. Options, smallest first:
-1. Native fast path: `vpdpwssd` = `vpmaddwd` + `vpaddd` (AVX2, Haswell+), run on the operand copies
-   like the AES/CLMUL fast path. Small gain: the C model is already cheap; trap entry + xsave
-   dominate.
-2. Run-ahead for VNNI loops (like SHA's): after a trap keep interpreting the straight-line AVX2
-   code that follows (ymm loads, `vpmovzx*`, `vpshufb`, `vpaddd`, more `vpdpwssd`). Big gain if the
-   hot loops are dense (SHA: 56 → 2 traps per block); needs VEX decoding + ymm state in
-   `churro_ra_step`, and a differential test like the SHA/ADX ones.
+BoringSSL. The ratelimited trap lines end in `@ <file>(<fs id>)+0x<file offset>` (vexemu
+`churro_where()`), so the hot libraries are known: after `libs-generic` the G20AJ's remaining
+~1.2 M traps / 7 min are `vpdpwssd` 0.7 M (essentially all in AppSearch's statically linked SIMD
+Adler-32, `libicing_anywhere.so`: one loop, 128 bytes/iteration, all VEX.128) plus GFNI in
+ART/HWUI/Rust — under 1 % of one core, so the options below are done for completeness, not need:
+1. Native fast path (**done**, 2026-10-22): `vpdpwssd` = `pmaddwd` + `paddd` on the operand copies
+   inside the handler's `fpregs_lock()` window, like the AES/CLMUL fast path; AVX2 is the image's
+   own floor, so it is always available. The C model stays for `vpdpbusd(s)` and the saturating
+   forms (no native equivalent: `pmaddubsw` saturates per word).
+2. VEX run-ahead (**done**, 2026-10-22): after an emulated AVX-VNNI instruction, interpret the
+   following straight-line VEX code — allow-list `vmovdqu`/`vmovdqa` loads, `vpxor`, `vpaddd`,
+   `vpmaddwd`, `vpsadbw`, `vpmaddubsw` and the four VNNI ops, plus `lea` and nops; anything else
+   (stores, branches, flag-setting ops, other maps/prefixes) ends the run and the CPU executes it
+   natively. Unlike SHA's run-ahead (C model on XMM low halves, after the lock) this runs *inside*
+   the `fpregs_lock()` window, so every allowed instruction executes natively on full 32-byte
+   register copies — the design point the SHA version couldn't reach: memory operands and the
+   instruction fetch use non-faulting copies (`pagefault_disable()` +
+   `__copy_from_user_inatomic()`), and a fault just ends the run so the CPU faults on the real
+   instruction instead. A VEX.128 write zeroes the upper half, like hardware. On the Adler-32
+   loop a run covers the rest of the iteration (its leading loads and shuffles are all
+   allow-listed) and stops at the loop's flag-setting `inc/cmp/jne`: ~1 trap per 128 bytes
+   instead of 8 (~8×; SHA got 28× because its loop is fully unrolled). Gated on AVX2+SSSE3 and
+   `churro.vexemu_runahead`; dormant on CPUs with VNNI. Confirmed on the T300FA: `vpdpwssd @
+   libicing_anywhere.so (+35 run-ahead)` per trap (main loop; +4 on the 2× tail), 210 677 traps
+   in 64 min vs 0.8 M in 31 min before = ~8× fewer, no native crashes.
 3. Offline patching of the hottest call sites (replacement needs a scratch register and more bytes
-   than the original → trampolines). Removes the traps; riskiest.
-1 + 2 together (the plan): run-ahead interprets the loop, and every `vpdpwssd` in it (and the
-other AVX2 ops: `vpaddd`, `vpshufb`, loads) runs natively on the register copies inside the
-handler's `fpregs_lock()` window, as the AES/CLMUL fast path already does. Run-ahead cuts the
-traps, the native ops make each interpreted instruction cheap. AVX2 is the image's own floor, so
-the native path is always available; the C model stays for the tests (`emu-c`-style mode). New
-over SHA's run-ahead: full 256-bit ymm copies and VEX decoding.
-Other machines: 1 and 2 live in the `#UD` handler, so CPUs with AVX-VNNI (Alder Lake+, Zen 5, the
-MSI) never run them. 3 changes binaries for everyone: it would need patched copies applied only on
-CPUs without AVX-VNNI (e.g. bind-mounted at boot after a CPUID check), or a replacement sequence
-that is correct and cheap everywhere.
+   than the original → trampolines): removes the traps, riskiest, still last resort — changes
+   binaries for everyone.
+Also noted (not taken): the emulator image's AppSearch APEX has a generic `libicing_anywhere.so`
+(no AVX2 at all), but it is an older build (one JNI method less): swapping the whole APEX would
+remove the remaining source at the root, yet downgrade a Play-updatable module — only worth it if
+a trap log shows it hot again (the T300FA is the machine to check: 2C/4T at 0.8 GHz).
 
 Not fixable this way: BoringSSL bundled inside apps (e.g. GMS's own Cronet, if that's what
 `CronetNet` threads use); the emulator keeps handling those.

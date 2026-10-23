@@ -284,6 +284,67 @@ ra_chain:
 	movdqu	%xmm15, 0xf0(%rdi)
 	ret
 
+// rav_chain(x = rdi: 16 ymm in/out, m = rsi: 32-byte-aligned 128-byte buffer): one trapping
+// vpdpwssd, the straight-line AVX2 of a zlib Adler-32 style loop (the shape the kernel's VEX
+// run-ahead is for), a run-stopping integer op, then a second trapping vpdpwssd with VEX.128
+// forms. Mirrored by rav_model() in vextest.c.
+	.globl rav_chain
+rav_chain:
+	vmovdqu	0x000(%rdi), %ymm0
+	vmovdqu	0x020(%rdi), %ymm1
+	vmovdqu	0x040(%rdi), %ymm2
+	vmovdqu	0x060(%rdi), %ymm3
+	vmovdqu	0x080(%rdi), %ymm4
+	vmovdqu	0x0a0(%rdi), %ymm5
+	vmovdqu	0x0c0(%rdi), %ymm6
+	vmovdqu	0x0e0(%rdi), %ymm7
+	vmovdqu	0x100(%rdi), %ymm8
+	vmovdqu	0x120(%rdi), %ymm9
+	vmovdqu	0x140(%rdi), %ymm10
+	vmovdqu	0x160(%rdi), %ymm11
+	vmovdqu	0x180(%rdi), %ymm12
+	vmovdqu	0x1a0(%rdi), %ymm13
+	vmovdqu	0x1c0(%rdi), %ymm14
+	vmovdqu	0x1e0(%rdi), %ymm15
+	// the VNNI ops are hand-encoded VEX (gas emits EVEX for the mnemonics; the emulator
+	// only handles VEX). C4 E2 <W~vvvvLpp> <op> <modrm> [disp8]
+	.byte	0xc4, 0xe2, 0x6d, 0x52, 0xcb		// vpdpwssd %ymm3,%ymm2,%ymm1  <- traps; 2..13 is run-ahead
+	vmovdqu	0x00(%rsi), %ymm4
+	vmovdqu	0x1c(%rsi), %ymm5
+	vmovdqa	0x40(%rsi), %ymm6
+	vpsadbw	%ymm4, %ymm5, %ymm7
+	vpmaddubsw %ymm4, %ymm5, %ymm8
+	vpaddd	%ymm7, %ymm8, %ymm9
+	vpmaddwd %ymm4, %ymm9, %ymm9
+	vpxor	%ymm9, %ymm10, %ymm10
+	.byte	0xc4, 0x42, 0x5d, 0x52, 0xd8		// vpdpwssd %ymm8,%ymm4,%ymm11
+	.byte	0xc4, 0x62, 0x4d, 0x52, 0x66, 0x60	// vpdpwssd 0x60(%rsi),%ymm6,%ymm12
+	.byte	0xc4, 0x62, 0x4d, 0x50, 0xef		// vpdpbusd %ymm7,%ymm6,%ymm13
+	lea	0x20(%rsi), %rax			// interpreted: rax = m + 0x20
+	.byte	0xc4, 0x42, 0x15, 0x52, 0xf4		// vpdpwssd %ymm12,%ymm13,%ymm14
+	addl	$1, %eax				// not allow-listed: run stops, CPU runs it
+	.byte	0xc4, 0x42, 0x25, 0x52, 0xfa		// vpdpwssd %ymm10,%ymm11,%ymm15  <- second run
+	vmovdqu	(%rax), %xmm0				// VEX.128 load: rax = m + 0x21
+	.byte	0xc4, 0xe2, 0x71, 0x52, 0xd0		// vpdpwssd %xmm0,%xmm1,%xmm2 (VEX.128)
+	vmovdqu	%ymm0, 0x000(%rdi)
+	vmovdqu	%ymm1, 0x020(%rdi)
+	vmovdqu	%ymm2, 0x040(%rdi)
+	vmovdqu	%ymm3, 0x060(%rdi)
+	vmovdqu	%ymm4, 0x080(%rdi)
+	vmovdqu	%ymm5, 0x0a0(%rdi)
+	vmovdqu	%ymm6, 0x0c0(%rdi)
+	vmovdqu	%ymm7, 0x0e0(%rdi)
+	vmovdqu	%ymm8, 0x100(%rdi)
+	vmovdqu	%ymm9, 0x120(%rdi)
+	vmovdqu	%ymm10, 0x140(%rdi)
+	vmovdqu	%ymm11, 0x160(%rdi)
+	vmovdqu	%ymm12, 0x180(%rdi)
+	vmovdqu	%ymm13, 0x1a0(%rdi)
+	vmovdqu	%ymm14, 0x1c0(%rdi)
+	vmovdqu	%ymm15, 0x1e0(%rdi)
+	vzeroupper
+	ret
+
 // --- vpclmulqdq: VEX.66.0F3A.W0 0x44 /r ib ---
 #define PCMSTUB(name, b2, imm)			\
 	.globl name;				\

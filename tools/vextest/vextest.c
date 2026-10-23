@@ -10,6 +10,7 @@
 // Verdict lines on stdout (fd 1):  VEXTEST <op>[/<width>/<form>] <native|emu> ok|FAIL
 // Summary: VEXTEST PASS <n>/<m>  (exit code 0) or VEXTEST FAIL <failed> (exit 1-ish via exit syscall).
 
+typedef unsigned char u8;
 typedef unsigned int u32;
 typedef unsigned long long u64;
 
@@ -58,6 +59,7 @@ extern void sha256msg2_rex44(u32 *r, const u32 *a, const u32 *b, const u32 *acc)
 extern void sha1nexte_rex41(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void sha256rnds2_rex45(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void ra_chain(u32 *x, const u32 *m);
+extern void rav_chain(u32 *x, const u32 *m);
 extern void adcx_r64_rex(u64 *s), adox_r64(u64 *s), adcx_r32(u64 *s), adox_m64_rex(u64 *s), adcx_m32(u64 *s);
 extern void vaesenc_256_reg(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
 extern void vaesenclast_256_reg(u32 *r, const u32 *a, const u32 *b, const u32 *acc);
@@ -357,6 +359,82 @@ static int ra_chain_test(void) {
 		for (int j = 0; j < 4; j++)
 			if (got[i][j] != want[i][j]) {
 				if (!bad++) { lpos = 0; lbs("VEXTEST runahead/sha-chain FAIL xmm"); lbd(i); lbs(" got="); lbx(got[i][j]); lbs(" want="); lbx(want[i][j]); lbs("\n"); lb_flush(); }
+			}
+	return bad;
+}
+
+// rav_chain's straight-line code (vexops.S), op by op: x = 16 ymm (u32[8] lanes), m = data.
+// On a gap CPU the first vpdpwssd and the one after the `add` trap; the kernel's VEX
+// run-ahead interprets everything between them, the lea included (so rax = m + 0x20 when
+// the run stops, and the CPU's addl makes the load read from m + 0x21).
+static void cp8(u32 *d, const u32 *s) { for (int i = 0; i < 8; i++) d[i] = s[i]; }
+static void ref_sad(u32 *d, const u32 *a, const u32 *b) {
+	const u8 *pa = (const u8 *)a, *pb = (const u8 *)b;	// symmetric in a/b
+	for (int g = 0; g < 4; g++) {
+		u32 s = 0;
+		for (int i = 0; i < 8; i++) {
+			int v = (int)pa[g * 8 + i] - (int)pb[g * 8 + i];
+			s += (u32)(v < 0 ? -v : v);
+		}
+		d[2 * g] = s;
+		d[2 * g + 1] = 0;
+	}
+}
+static void ref_mubsw(u32 *d, const u32 *u_, const u32 *s_) {	// unsigned u_ * signed s_
+	const u8 *pu = (const u8 *)u_;
+	const signed char *ps = (const signed char *)s_;
+	signed short *pd = (signed short *)d;
+	for (int i = 0; i < 16; i++) {
+		int v = (int)pu[2 * i] * (int)ps[2 * i] + (int)pu[2 * i + 1] * (int)ps[2 * i + 1];
+		pd[i] = v > 32767 ? 32767 : v < -32768 ? -32768 : (short)v;
+	}
+}
+static void ref_mwd(u32 *d, const u32 *a_, const u32 *b_) {	// pmaddwd: wrapping s16 dot products
+	const signed short *pa = (const signed short *)a_, *pb = (const signed short *)b_;
+	for (int i = 0; i < 8; i++) {
+		int v = (int)pa[2 * i] * pb[2 * i] + (int)pa[2 * i + 1] * pb[2 * i + 1];
+		d[i] = (u32)v;
+	}
+}
+static void rav_model(u32 x[16][8], const u32 *m) {
+	u32 t[8];
+	const u8 *mb = (const u8 *)m;
+	int i;
+	ref_52(t, x[1], x[2], x[3], 8); cp8(x[1], t);		// vpdpwssd %ymm3,%ymm2,%ymm1
+	cp8(x[4], m);						// vmovdqu 0x00(%rsi),%ymm4
+	cp8(x[5], m + 7);					// vmovdqu 0x1c(%rsi),%ymm5
+	cp8(x[6], m + 16);					// vmovdqa 0x40(%rsi),%ymm6
+	ref_sad(x[7], x[5], x[4]);				// vpsadbw %ymm4,%ymm5,%ymm7
+	ref_mubsw(x[8], x[5], x[4]);				// vpmaddubsw %ymm4,%ymm5,%ymm8
+	for (i = 0; i < 8; i++) x[9][i] = x[8][i] + x[7][i];	// vpaddd %ymm7,%ymm8,%ymm9
+	ref_mwd(x[9], x[9], x[4]);				// vpmaddwd %ymm4,%ymm9,%ymm9
+	for (i = 0; i < 8; i++) x[10][i] ^= x[9][i];		// vpxor %ymm9,%ymm10,%ymm10
+	ref_52(t, x[11], x[4], x[8], 8); cp8(x[11], t);		// vpdpwssd %ymm8,%ymm4,%ymm11
+	ref_52(t, x[12], x[6], m + 24, 8); cp8(x[12], t);	// vpdpwssd 0x60(%rsi),%ymm6,%ymm12
+	ref_50(t, x[13], x[6], x[7], 8); cp8(x[13], t);		// vpdpbusd %ymm7,%ymm6,%ymm13
+	// lea 0x20(%rsi),%rax (interpreted) then addl $1,%eax (native): rax = m + 0x21
+	ref_52(t, x[14], x[13], x[12], 8); cp8(x[14], t);	// vpdpwssd %ymm12,%ymm13,%ymm14
+	ref_52(t, x[15], x[11], x[10], 8); cp8(x[15], t);	// vpdpwssd %ymm10,%ymm11,%ymm15
+	for (i = 0; i < 16; i++) ((u8 *)x[0])[i] = mb[0x21 + i];	// vmovdqu (%rax),%xmm0
+	for (i = 4; i < 8; i++) x[0][i] = 0;			// VEX.128 zeroes the upper half
+	ref_52(t, x[2], x[1], x[0], 4);				// vpdpwssd %xmm0,%xmm1,%xmm2
+	for (i = 0; i < 4; i++) x[2][i] = t[i];
+	for (i = 4; i < 8; i++) x[2][i] = 0;			// VEX.128 zeroes the upper half
+}
+static int rav_chain_test(void) {
+	static u32 got[16][8], want[16][8], m[32] __attribute__((aligned(64)));
+	u32 seed = 0xcafe1234;
+	for (int i = 0; i < 16; i++)
+		for (int j = 0; j < 8; j++) { seed = seed * 1103515245 + 12345; got[i][j] = want[i][j] = seed; }
+	for (int i = 0; i < 32; i++) { seed = seed * 1103515245 + 12345; m[i] = seed; }
+	rav_chain(&got[0][0], m);
+	rav_model(want, m);
+	int bad = 0;
+	for (int i = 0; i < 16; i++)
+		for (int j = 0; j < 8; j++)
+			if (got[i][j] != want[i][j]) {
+				if (!bad++) { lpos = 0; lbs("VEXTEST runahead/vex-chain FAIL ymm"); lbd(i); lbs(" lane"); lbd(j);
+					lbs(" got="); lbx(got[i][j]); lbs(" want="); lbx(want[i][j]); lbs("\n"); lb_flush(); }
 			}
 	return bad;
 }
@@ -932,6 +1010,14 @@ void cstart(long *sp) {
 	lpos = 0;
 	lbs("VEXTEST runahead/sha-chain ");
 	lbs(rf ? "FAIL" : (have_sha ? "native ok" : "emu ok"));
+	lbs("\n"); lb_flush();
+	int rrf = rav_chain_test();
+	total++;
+	if (!rrf) pass++;
+	else stage_fail |= 1;
+	lpos = 0;
+	lbs("VEXTEST runahead/vex-chain ");
+	lbs(rrf ? "FAIL" : (have_vnni ? "native ok" : "emu ok"));
 	lbs("\n"); lb_flush();
 	int cf = chain_stress();
 	total++;

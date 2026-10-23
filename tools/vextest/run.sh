@@ -22,6 +22,7 @@ do_build() {
   objdump -d "$B" >"$T/vextest.dis"
   for want in vpdpbusd vpdpbusds vpdpwssd vpdpwssds vpmadd52luq vpmadd52huq \
               vgf2p8affineqb vgf2p8affineinvqb vgf2p8mulb vpclmul \
+              vpsadbw vpmaddubsw vpmaddwd \
               sha256rnds2 sha256msg1 sha256msg2 sha1nexte sha1msg1 sha1msg2 sha1rnds4 \
               vaesenc vaesenclast vaesdec vaesdeclast; do
     grep -q "$want" "$T/vextest.dis" && echo "  disasm ok: $want" || { echo "  DISASM MISSING: $want"; exit 1; }
