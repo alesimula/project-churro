@@ -2,3 +2,9 @@
 # lets Bluetooth audio and Wi-Fi collide (Wi-Fi drops, BT controller "Hardware Error 0x35").
 # Only read by ath9k; no effect elsewhere.
 ath9k.btcoex_enable=1
+# MediaTek MT7921/MT7922: the kernel panicked right after "WM Firmware Version", the step before
+# the CLC (country/regulatory power table) download (MSI Modern 15 B7M). Skip CLC; the kernel's
+# regulatory.db still applies. Only read by mt7921-common. mt7921-common is a module, so the kernel
+# ignores this; ueventd's libmodprobe parses module.option= from /proc/cmdline and passes it to
+# finit_module (also when loaded as mt7921e's dependency).
+mt7921_common.disable_clc=1
