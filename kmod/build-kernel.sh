@@ -67,7 +67,14 @@ if [ -n "${DISTRO_CONFIG:-}" ]; then
      include/linux/sched/*.h include/net/{sock,net_namespace,dst}.h include/net/netns/*.h) |
     grep -oE 'CONFIG_[A-Za-z0-9_]+' | sed 's/^CONFIG_//' | sort -u > "$O/coresyms"
   for i in $(seq 1 20); do
-    cp "$O/.config.predistro" "$O/.config"; SC $(sed 's/^/-m /' "$O/distro.add"); "${MK[@]}" olddefconfig >/dev/null
+    # WLAN vendor menu bools =y: Google's GKI config enables only a few (ath, microchip, ...),
+    # and olddefconfig silently drops every symbol inside a closed vendor menu - all of
+    # Realtek/MediaTek/Broadcom's drivers vanished that way (G20AJ's RTL8821AE: no module).
+    # The bools come from the tree (each vendor's own Kconfig), so any new vendor is covered;
+    # =y costs nothing on its own.
+    cp "$O/.config.predistro" "$O/.config"
+    SC $(sed 's/^/-m /' "$O/distro.add") $(sed -n 's/^config \(WLAN_VENDOR_[A-Z0-9_]*\)$/-e \1/p' "$SRC"/drivers/net/wireless/*/Kconfig)
+    "${MK[@]}" olddefconfig >/dev/null
     grep -E '^CONFIG_[A-Za-z0-9_]+=y$' "$O/.config" | grep -vxFf "$O/.config.predistro" | sed 's/^CONFIG_//; s/=y$//' | sort > "$O/newy"
     comm -12 "$O/newy" "$O/coresyms" | grep -vxF -f <(printf '%s\n' ${DISTRO_BUILTIN_OK:-} x) > "$O/forbid" || true
     [ -s "$O/forbid" ] || break
