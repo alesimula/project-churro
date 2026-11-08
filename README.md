@@ -72,6 +72,18 @@ the machine halts on errors instead of rebooting, and everything is saved on the
 **CHURRO-LOG** drive (visible in Windows): `boot.log` (kernel + Android init) and `logcat.log`
 (Android's own log, e.g. why a service crashes) and `audio.log` (sound card / codec state,
 logged when it changes); the previous boot's are `*.prev.log`.
+
+**Updating a stick without losing data** (same Android build, e.g. a rebuilt image while testing):
+on Windows run `tools\flash-keep-data.bat [image]` (no image given: pick a `.img`/`.img.gz` from `out\`): it
+installs usbipd-win if needed, lists only USB disks (never the system/boot disk), passes the chosen
+one through to WSL, checks it holds Googlebook OS and asks before writing. Underneath,
+`sudo tools/flash-keep-data.sh churro.img[.gz] /dev/sdX` rewrites every partition except
+userdata, metadata (its encryption keys), the security-state partitions and CHURRO-LOG, so
+setup and apps survive. It refuses a disk whose partition layout differs from the image. From
+WSL, pass the stick through with [usbipd-win](https://github.com/dorssel/usbipd-win): once
+`winget install usbipd` and, as admin, `usbipd bind --busid <id>` (`usbipd list` shows it); then
+per flash `usbipd attach --wsl --busid <id>` (the stick leaves Windows and shows up in `lsblk`)
+and `usbipd detach --busid <id>` afterwards.
 Install to a disk from any Linux live session: `sudo ./churro.sh install churro.img /dev/nvme0n1`
 (or `/dev/sda` for SATA / M.2 SATA, `/dev/mmcblk0` for eMMC). Supported controller modes: AHCI,
 IDE, Intel VMD/RST; RST "Optane/NVMe remapping" isn't (switch the BIOS to AHCI). Android only

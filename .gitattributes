@@ -1,2 +1,4 @@
 # Scripts run in Linux/WSL: keep LF everywhere (CRLF breaks bash: $'\r': command not found)
 * text=auto eol=lf
+# Windows batch files need CRLF (cmd misparses labels in LF files)
+*.bat text eol=crlf
