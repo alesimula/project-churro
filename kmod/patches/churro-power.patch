@@ -1,0 +1,122 @@
+diff -ruN a/drivers/power/supply/Makefile b/drivers/power/supply/Makefile
+--- a/drivers/power/supply/Makefile	2026-11-08 19:17:26.697575967 +0100
++++ b/drivers/power/supply/Makefile	2026-11-08 19:17:26.701508858 +0100
+@@ -4,6 +4,7 @@
+ power_supply-y				:= power_supply_core.o
+ power_supply-$(CONFIG_SYSFS)		+= power_supply_sysfs.o
+ power_supply-$(CONFIG_LEDS_TRIGGERS)	+= power_supply_leds.o
++obj-$(CONFIG_POWER_SUPPLY)		+= churro-power.o
+ 
+ obj-$(CONFIG_POWER_SUPPLY)	+= power_supply.o
+ obj-$(CONFIG_POWER_SUPPLY_HWMON) += power_supply_hwmon.o
+diff -ruN a/drivers/power/supply/churro-power.c b/drivers/power/supply/churro-power.c
+--- a/drivers/power/supply/churro-power.c	1970-01-01 01:00:00.000000000 +0100
++++ b/drivers/power/supply/churro-power.c	2026-11-08 19:17:26.705441748 +0100
+@@ -0,0 +1,107 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Project Churro: mains power and a full battery for PCs that have no battery (desktops, mini
++ * PCs, VMs). Googlebook's health HAL finds no battery and reports 0 % on battery power, so
++ * Android warns "battery below 20 %" and apps refuse to work (the Recorder: "battery too low").
++ * Registered only when the ACPI tables have no battery (PNP0C0A): laptops and tablets keep their
++ * real one. churro.fakebattery=0 on the kernel cmdline disables it.
++ */
++#include <linux/acpi.h>
++#include <linux/init.h>
++#include <linux/power_supply.h>
++
++static bool churro_fakebattery = true;
++
++static int __init churro_fakebattery_setup(char *str)
++{
++	return kstrtobool(str, &churro_fakebattery) == 0;
++}
++__setup("churro.fakebattery=", churro_fakebattery_setup);
++
++static int churro_ac_get(struct power_supply *psy, enum power_supply_property psp,
++			 union power_supply_propval *val)
++{
++	if (psp != POWER_SUPPLY_PROP_ONLINE)
++		return -EINVAL;
++	val->intval = 1;
++	return 0;
++}
++
++static int churro_bat_get(struct power_supply *psy, enum power_supply_property psp,
++			  union power_supply_propval *val)
++{
++	switch (psp) {
++	case POWER_SUPPLY_PROP_STATUS:
++		val->intval = POWER_SUPPLY_STATUS_FULL;
++		break;
++	case POWER_SUPPLY_PROP_HEALTH:
++		val->intval = POWER_SUPPLY_HEALTH_GOOD;
++		break;
++	case POWER_SUPPLY_PROP_PRESENT:
++		val->intval = 1;
++		break;
++	case POWER_SUPPLY_PROP_TECHNOLOGY:
++		val->intval = POWER_SUPPLY_TECHNOLOGY_UNKNOWN;
++		break;
++	case POWER_SUPPLY_PROP_CAPACITY:
++		val->intval = 100;
++		break;
++	case POWER_SUPPLY_PROP_TEMP:
++		val->intval = 250;		/* 25.0 C */
++		break;
++	case POWER_SUPPLY_PROP_VOLTAGE_NOW:
++		val->intval = 12000000;		/* uV */
++		break;
++	default:
++		return -EINVAL;
++	}
++	return 0;
++}
++
++static enum power_supply_property churro_ac_props[] = { POWER_SUPPLY_PROP_ONLINE };
++static enum power_supply_property churro_bat_props[] = {
++	POWER_SUPPLY_PROP_STATUS, POWER_SUPPLY_PROP_HEALTH, POWER_SUPPLY_PROP_PRESENT,
++	POWER_SUPPLY_PROP_TECHNOLOGY, POWER_SUPPLY_PROP_CAPACITY, POWER_SUPPLY_PROP_TEMP,
++	POWER_SUPPLY_PROP_VOLTAGE_NOW,
++};
++
++static const struct power_supply_desc churro_ac_desc = {
++	.name = "churro-ac",
++	.type = POWER_SUPPLY_TYPE_MAINS,
++	.properties = churro_ac_props,
++	.num_properties = ARRAY_SIZE(churro_ac_props),
++	.get_property = churro_ac_get,
++};
++
++static const struct power_supply_desc churro_bat_desc = {
++	.name = "churro-battery",
++	.type = POWER_SUPPLY_TYPE_BATTERY,
++	.properties = churro_bat_props,
++	.num_properties = ARRAY_SIZE(churro_bat_props),
++	.get_property = churro_bat_get,
++};
++
++static char *churro_ac_supplied_to[] = { "churro-battery" };
++
++static int __init churro_power_init(void)
++{
++	const struct power_supply_config ac_cfg = {
++		.supplied_to = churro_ac_supplied_to,
++		.num_supplicants = ARRAY_SIZE(churro_ac_supplied_to),
++	};
++	struct power_supply *ac, *bat;
++
++	if (!churro_fakebattery || acpi_dev_present("PNP0C0A", NULL, -1))
++		return 0;
++	bat = power_supply_register(NULL, &churro_bat_desc, NULL);
++	if (IS_ERR(bat))
++		return PTR_ERR(bat);
++	ac = power_supply_register(NULL, &churro_ac_desc, &ac_cfg);
++	if (IS_ERR(ac)) {
++		power_supply_unregister(bat);
++		return PTR_ERR(ac);
++	}
++	pr_info("churro-power: no ACPI battery, registered mains power and a full battery\n");
++	return 0;
++}
++late_initcall(churro_power_init);
