@@ -173,7 +173,7 @@ EOF
     # place, so the FAT/directory never change at boot and a power cut can't corrupt them.
     local lm; lm=$(mktemp -d); mount "${LOOP}p$ln" "$lm"
     head -c $((64 << 20)) /dev/zero | tr '\0' '\n' > "$lm/boot.log"
-    for f in boot.prev.log logcat.log logcat.prev.log; do cp "$lm/boot.log" "$lm/$f"; done
+    for f in boot.prev.log logcat.log logcat.prev.log audio.log audio.prev.log; do cp "$lm/boot.log" "$lm/$f"; done
     umount "$lm"; rmdir "$lm"
   fi
 

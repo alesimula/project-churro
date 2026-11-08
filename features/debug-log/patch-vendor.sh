@@ -26,6 +26,9 @@ cat >> "$S/vendor_sepolicy.cil" <<EOF
 (allow kernel_$V logdr_socket_$V (sock_file (write getattr)))
 (allow kernel_$V logd_$V (unix_stream_socket (connectto)))
 (allow kernel_$V self (unix_stream_socket (create connect read write getopt setopt shutdown)))
+; audio.log: ALSA playback/codec state from /proc/asound
+(allow kernel_$V proc_asound_$V (dir (search getattr open read)))
+(allow kernel_$V proc_asound_$V (file (getattr open read)))
 EOF
 rm -f "$S"/precompiled_sepolicy "$S"/precompiled_sepolicy.*.sha256
 echo "   vendor: SELinux rules for the boot logger, precompiled policy removed"

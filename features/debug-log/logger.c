@@ -2,6 +2,7 @@
 // entries only). Forks children that copy
 //   - the kernel log (which also carries Android init's messages) -> boot.log
 //   - Android's own log (logcat: main/system/crash buffers, read from logd) -> logcat.log
+//   - ALSA state (/proc/asound: card list, HD-audio codec dumps, logged on change) -> audio.log
 // on the CHURRO-LOG partition (FAT32, readable from Windows), then execs the real /init as PID 1.
 // The *.log / *.prev.log files are created by churro.sh at a fixed size, filled with blank lines;
 // the logger only overwrites them in place (text ends at the first empty line), so the FAT and
@@ -246,6 +247,90 @@ static void logcat_loop(void) {
   }
 }
 
+// Read a small proc file (whole) into a static buffer; NULL if missing.
+static char *slurp(const char *path) {
+  static char b[256 << 10];
+  int fd = open(path, O_RDONLY | O_CLOEXEC);
+  ssize_t n, len = 0;
+  if (fd < 0) return NULL;
+  while (len < (ssize_t)sizeof b - 1 && (n = read(fd, b + len, sizeof b - 1 - len)) > 0) len += n;
+  close(fd);
+  b[len] = 0;
+  return b;
+}
+
+// Append text, each line prefixed with tag; skips empty lines (they would end the log text).
+static int put(struct sink *s, const char *tag, const char *t) {
+  for (const char *l = t, *e; t && *l; l = *e ? e + 1 : e) {
+    e = strchrnul(l, '\n');
+    if (e > l) s->used += sprintf(s->buf + s->used, "%s %.*s\n", tag, (int)(e - l > 8000 ? 8000 : e - l), l);
+    if (s->used >= BUF_MAX && sink_flush(s)) return -1;
+  }
+  return 0;
+}
+
+// Log path's text when it changes: all of it the first time (or when its line count changes),
+// then only the changed lines, each after its "Node 0x.." header. *prev keeps the last copy.
+static int track(struct sink *s, const char *tag, const char *path, char **prev) {
+  char *t = slurp(path), *o = *prev;
+  if (!t || (o && !strcmp(o, t))) return 0;
+  int nt = 0, no = 0;
+  for (char *c = t; *c; c++) nt += *c == '\n';
+  for (char *c = o; o && *c; c++) no += *c == '\n';
+  if (!o || nt != no) {
+    if (put(s, tag, t)) return -1;
+  } else {
+    const char *node = NULL, *shown = NULL;
+    for (const char *l = t, *m = o; *l; ) {
+      const char *e = strchrnul(l, '\n'), *f = strchrnul(m, '\n');
+      if (!strncmp(l, "Node ", 5)) node = l;
+      if (e - l != f - m || memcmp(l, m, e - l)) {
+        if (node && node != shown && node != l) {
+          s->used += sprintf(s->buf + s->used, "%s %.*s\n", tag, (int)(strchrnul(node, '\n') - node), node);
+          shown = node;
+        }
+        if (e > l) s->used += sprintf(s->buf + s->used, "%s %.*s\n", tag, (int)(e - l > 8000 ? 8000 : e - l), l);
+        if (s->used >= BUF_MAX && sink_flush(s)) return -1;
+      }
+      l = *e ? e + 1 : e;
+      m = *f ? f + 1 : f;
+    }
+  }
+  free(o);
+  *prev = strdup(t);
+  return 0;
+}
+
+// Audio debug: once a second, /proc/asound/cards and every HD-audio codec dump (pin controls,
+// amp gain/mute, EAPD, and the DACs' "Converter: stream=N" - non-zero while Android streams to
+// it), logged when they change: the mixer/codec state before, during and after playback.
+// (The per-PCM status/hw_params files need CONFIG_SND_VERBOSE_PROCFS, which GKI leaves off and
+// which changes struct snd_pcm_substream, i.e. the kABI the image's sound modules are built for.)
+// Times are UTC, like logcat.log.
+static void audio_loop(void) {
+  static struct sink s;
+  static char *prev[8 * 4 + 1];
+  char p[64], tag[48];
+  if (sink_open(&s, "mnt/audio.log", "mnt/audio.prev.log")) { fail("opening audio.log"); return; }
+  s.used += sprintf(s.buf, "churro-logger: sampling /proc/asound once a second\n");
+  for (;;) {
+    struct timespec ts;
+    struct tm tm;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    gmtime_r(&ts.tv_sec, &tm);
+    snprintf(tag, sizeof tag, "%02d:%02d:%02d cards", tm.tm_hour, tm.tm_min, tm.tm_sec);
+    if (track(&s, tag, "proc/asound/cards", &prev[32])) return;
+    for (int c = 0; c < 8; c++)
+      for (int k = 0; k < 4; k++) {
+        snprintf(p, sizeof p, "proc/asound/card%d/codec#%d", c, k);
+        snprintf(tag, sizeof tag, "%02d:%02d:%02d C%d#%d", tm.tm_hour, tm.tm_min, tm.tm_sec, c, k);
+        if (track(&s, tag, p, &prev[c * 4 + k])) return;
+      }
+    if (sink_flush(&s)) return;
+    sleep(1);
+  }
+}
+
 static void logger(void) {
   // Private mount namespace: first-stage init moves every mount it can see into the new root
   // and aborts if one fails, so ours must stay invisible to it.
@@ -273,6 +358,10 @@ static void logger(void) {
   if (mount("part", "mnt", "vfat", MS_NOATIME, NULL)) { fail("mounting " PARTNAME); return; }
   if (fork() == 0) {
     logcat_loop();
+    _exit(0);
+  }
+  if (fork() == 0) {
+    audio_loop();
     _exit(0);
   }
   kmsg_loop(k);

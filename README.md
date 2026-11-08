@@ -70,7 +70,8 @@ Write `churro.img` (or a `.img.gz` of it) to a USB drive (Rufus "DD image", Etch
 Secure Boot, boot. If it stops or hangs, boot the GRUB entry "debug": the log scrolls on screen,
 the machine halts on errors instead of rebooting, and everything is saved on the stick's
 **CHURRO-LOG** drive (visible in Windows): `boot.log` (kernel + Android init) and `logcat.log`
-(Android's own log, e.g. why a service crashes); the previous boot's are `*.prev.log`.
+(Android's own log, e.g. why a service crashes) and `audio.log` (sound card / codec state,
+logged when it changes); the previous boot's are `*.prev.log`.
 Install to a disk from any Linux live session: `sudo ./churro.sh install churro.img /dev/nvme0n1`
 (or `/dev/sda` for SATA / M.2 SATA, `/dev/mmcblk0` for eMMC). Supported controller modes: AHCI,
 IDE, Intel VMD/RST; RST "Optane/NVMe remapping" isn't (switch the BIOS to AHCI). Android only

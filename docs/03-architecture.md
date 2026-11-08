@@ -326,7 +326,12 @@ files get a sibling's label or an explicit one.
   Android's log into `logcat.log` the way logcat does: it connects to logd's reader socket
   (`/dev/socket/logdr`, reached via `/proc/1/root` because the logger lives in its own mount
   namespace), sends `stream lids=0,1,3,4` (main, radio, system, crash) with a 16 MiB receive
-  buffer (logd drops slow readers), and writes `HH:MM:SS.mmm pid tid P tag: msg` lines (UTC). The child stays in the `kernel` SELinux
+  buffer (logd drops slow readers), and writes `HH:MM:SS.mmm pid tid P tag: msg` lines (UTC). A third child
+  writes `audio.log`: once a second `/proc/asound/cards` and every HD-audio codec dump (pin
+  controls, amp gain/mute, EAPD, DAC `Converter: stream=N`, non-zero while a stream runs),
+  in full the first time, then only the changed lines under their `Node` header, tagged
+  `HH:MM:SS C<card>#<codec>` (UTC). Per-PCM `status`/`hw_params` would need
+  `CONFIG_SND_VERBOSE_PROCFS`, which changes `struct snd_pcm_substream` (GKI kABI): not used. The child stays in the `kernel` SELinux
   domain, so the feature adds the needed rules to the vendor policy and drops the precompiled
   policy (init compiles it at boot). Feature hooks used: `build-ramdisk.sh`, `cmdline-debug`.
 * `gpu-nouveau` (default) — NVIDIA GPUs (nouveau.ko itself comes with drivers-extra):
