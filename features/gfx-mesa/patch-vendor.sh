@@ -6,7 +6,11 @@
 set -euo pipefail
 V=$1
 M=${CHURRO_MESA:?set CHURRO_MESA to the meson DESTDIR of gfx/build-mesa.sh}
-L=$(find "$M" -type d -name lib64 | head -1)
+# the drivers live under meson's default prefix; the VA install (va-libs-path) creates further
+# lib64 dirs, so find-by-name must not be used here (it once picked $M/lib64 and silently
+# skipped the whole Mesa install: no EGL/Vulkan in the image, SurfaceFlinger abort loop)
+L="$M/usr/local/lib64"
+[ -f "$L/libEGL_mesa.so" ] || { echo "gfx-mesa: no Mesa drivers in $L" >&2; exit 1; }
 SPHAL=u:object_r:same_process_hal_file:s0
 put() { install -D -m 0644 -o root -g root "$1" "$2"; setfattr -n security.selinux -v "$SPHAL" "$2"; }
 
@@ -32,7 +36,29 @@ if [ -n "${CHURRO_HASVK_IDS:-}" ]; then
 fi
 
 # 2. their non-platform dependencies (libgallium-*.so, libdrm_amdgpu.so, ...), closure
-todo=("$V"/lib64/egl/*_mesa.so "${vks[@]}"); added=""
+# VA-API drivers (nouveau, virtio_gpu): Google's camera HAL (VcEffects) initializes libva at
+# session open and unwraps a failed init (SIGABRT, docs/02); the image ships only Intel's iHD
+# driver. Mesa installs them as symlinks to libgallium_dri.so (one lib, many entry points) -
+# the closure below puts libgallium_dri.so in $V/lib64, so the in-image link is relative to it.
+vas=()
+for f in $(find "$M" -name "*_drv_video.so" | sort -u); do
+  n=$(basename "$f")
+  ln -sfn libgallium_dri.so "$V/lib64/$n"
+  setfattr -h -n security.selinux -v "$SPHAL" "$V/lib64/$n"
+  vas+=("$V/lib64/$n")
+done
+todo=("$V"/lib64/egl/*_mesa.so "${vks[@]}" "${vas[@]}"); added=""
+
+# VA on nouveau: nouveau-zink-from-kepler.patch puts GL on Zink from Kepler on, but Zink has no
+# VA-API, so nouveau_drv_video.so failed to init (G20AJ: va_openDriver returns 2; camera MJPEG
+# decode, cros-codecs). The VA users take Mesa's classic nouveau pipe instead (getenv wins over
+# the mesa.* properties these domains can't read anyway). Rewritten in place, not sed -i: that
+# would drop the rc's SELinux label (see edit() below).
+for rc in "$V"/etc/init/android.hardware.camera.provider-usb-service.android-desktop.rc \
+          "$V"/etc/init/android.hardware.media.c2-cros-codecs-service.rc; do
+  [ -f "$rc" ] || continue
+  c=$(sed '/^service /a\    setenv NOUVEAU_USE_ZINK false' "$rc"); printf '%s\n' "$c" > "$rc"
+done
 while [ ${#todo[@]} -gt 0 ]; do
   f=${todo[0]}; todo=("${todo[@]:1}"); [ -f "$f" ] || continue
   for n in $(readelf -d "$f" | awk '/NEEDED/ {gsub(/[][]/, "", $NF); print $NF}'); do

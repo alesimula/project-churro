@@ -71,11 +71,12 @@ if [ ! -f "$SYS/lib64/pkgconfig/libdrm.pc" ]; then
    && cd "libdrm-$LIBDRM_VER" && rm -rf build-android \
    && meson setup build-android --cross-file ../cross-android-x86_64 --prefix=/ --libdir lib64 --buildtype release \
         -Ddefault_library=static \
-        -Dintel=disabled -Damdgpu=enabled -Dradeon=enabled -Dnouveau=disabled -Dvmwgfx=disabled \
+        -Dintel=disabled -Damdgpu=enabled -Dradeon=enabled -Dnouveau=enabled -Dvmwgfx=disabled \
         -Dcairo-tests=disabled -Dman-pages=disabled -Dvalgrind=disabled -Dtests=false -Dudev=false | tail -3 \
    && ninja -C build-android | tail -2 && DESTDIR=$SYS meson install -C build-android --no-rebuild >/dev/null)
   sed -i "s#^prefix=.*#prefix=$SYS#" "$SYS"/lib64/pkgconfig/*.pc
 fi
+sed -i "s#PKG_CONFIG_LIBDIR=[^']*#PKG_CONFIG_LIBDIR=$SYS/lib64/pkgconfig#" "$WORK/cross-android-x86_64"
 # libelf for NVK (reads CUDA cubins): the small old libelf Mesa's own Android CI uses
 LIBELF=libelf-0.8.13
 if [ ! -f "$SYS/lib64/libelf.a" ]; then
@@ -86,12 +87,25 @@ if [ ! -f "$SYS/lib64/libelf.a" ]; then
         ./configure -q --host=x86_64-linux-gnu --disable-nls --disable-shared --prefix="$SYS" --libdir="$SYS/lib64" \
    && make -s >/dev/null && make -s install >/dev/null)
 fi
+# libva for the VA state tracker (headers + static core; the *runtime* libva is the image's own
+# 1.22.0 - version must match). Google's camera HAL (VcEffects) initializes libva at session
+# open and unwraps a failed init (SIGABRT), and the image only ships Intel's iHD driver.
+if [ ! -f "$SYS/lib64/pkgconfig/libva.pc" ]; then
+  (cd "$WORK" && rm -rf "libva-$LIBVA_VER" && curl -fsSL -o "libva-$LIBVA_VER.tar.bz2" "https://github.com/intel/libva/releases/download/$LIBVA_VER/libva-$LIBVA_VER.tar.bz2" \
+   && tar -xjf "libva-$LIBVA_VER.tar.bz2" && cd "libva-$LIBVA_VER" && rm -rf build-android \
+   && meson setup build-android --cross-file ../cross-android-x86_64 --prefix=/ --libdir lib64 --buildtype release \
+        -Ddefault_library=static \
+        -Dwith_x11=no -Dwith_glx=no -Dwith_wayland=no -Ddisable_drm=false | tail -3 \
+   && ninja -C build-android | tail -2 && DESTDIR=$SYS meson install -C build-android --no-rebuild >/dev/null)
+  sed -i "s#^prefix=.*#prefix=$SYS#" "$SYS"/lib64/pkgconfig/libva.pc 2>/dev/null || true
+fi
 sed -i "s#PKG_CONFIG_LIBDIR=[^']*#PKG_CONFIG_LIBDIR=$SYS/lib64/pkgconfig#" ../cross-android-x86_64
 rm -rf build-android
 meson setup build-android --cross-file ../cross-android-x86_64 \
   --libdir lib64 --buildtype release -Db_ndebug=true \
   -Dplatforms=android -Dplatform-sdk-version=$API -Dandroid-stub=true -Dandroid-libbacktrace=disabled \
   -Dgallium-drivers=iris,crocus,nouveau,zink,virgl,softpipe -Dvulkan-drivers=nouveau,intel_hasvk,amd \
+  -Dgallium-va=true -Dva-libs-path=/vendor/lib64 \
   -Dllvm=disabled -Dgbm=disabled -Dglx=disabled -Degl=enabled -Dgles1=enabled -Dgles2=enabled \
   -Degl-lib-suffix=_mesa -Dgles-lib-suffix=_mesa \
   -Dvalgrind=disabled -Dlibunwind=disabled -Dzstd=disabled -Dmesa-clc=system -Dprecomp-compiler=system \

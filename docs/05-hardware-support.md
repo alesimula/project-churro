@@ -361,6 +361,19 @@ setting 3): every packet dropped (3520 in one call), and closing SCO preceded on
 `Hardware Error 0x35`. Music (A2DP) not affected. Likely fix: no wideband speech for controllers
 without the mSBC USB alt setting (per-controller quirk); to check after btcoex.
 
+**Camera on non-Intel GPUs: VcEffects needs VA-API** (G20AJ, 2026-10-23). Google's camera HAL
+initializes libva at session open and `.unwrap()`s a failed init → SIGABRT; the image ships
+only Intel's `iHD_drv_video.so`, which is why the T300FA's camera works. Status: Mesa is built
+with the VA state tracker (`-Dgallium-va`; libva 2.22 — matching the image's VA-API 1.22 — in
+the Mesa sysroot; `gfx-mesa` installs `*_drv_video.so` to `/vendor/lib64` as symlinks to
+libgallium_dri.so). On the G20AJ the driver loaded but **init failed** (`va_openDriver()
+returns 2`, cros-codecs "Failed to open DRM display", then the unwrap panic): our
+`nouveau-zink-from-kepler.patch` sends nouveau to Zink, and Zink has no VA-API. **Fixed**
+(2026-11-07): `gfx-mesa` adds `setenv NOUVEAU_USE_ZINK false` to the camera provider and
+c2 cros-codecs services, so VA uses Mesa's classic nouveau pipe while GL stays on Zink/NVK.
+G20AJ: `va_openDriver() returns 0`, camera works, no native crashes. (Not SELinux; `LIBVA_MESSAGING_LEVEL`
+/ `MESA_DEBUG` showed nothing — Mesa's VA frontend fails silently.)
+
 **`libz.so` / libc traps** — fixed by `libs-generic` (above, "`libz.so` and bionic"); T300FA boot
 animation 95–106 s → 36 s. Left: GFNI in ART, `libhwui`, Rust `libstd`.
 
