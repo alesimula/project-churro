@@ -1,0 +1,61 @@
+diff -ruN a/drivers/input/Makefile b/drivers/input/Makefile
+--- a/drivers/input/Makefile	2026-11-08 18:34:01.378514990 +0100
++++ b/drivers/input/Makefile	2026-11-08 18:34:01.382474211 +0100
+@@ -18,6 +18,7 @@
+ obj-$(CONFIG_INPUT_MOUSEDEV)	+= mousedev.o
+ obj-$(CONFIG_INPUT_JOYDEV)	+= joydev.o
+ obj-$(CONFIG_INPUT_EVDEV)	+= evdev.o
++obj-$(CONFIG_INPUT)		+= churro-lid.o
+ 
+ obj-$(CONFIG_INPUT_KEYBOARD)	+= keyboard/
+ obj-$(CONFIG_INPUT_MOUSE)	+= mouse/
+diff -ruN a/drivers/input/churro-lid.c b/drivers/input/churro-lid.c
+--- a/drivers/input/churro-lid.c	1970-01-01 01:00:00.000000000 +0100
++++ b/drivers/input/churro-lid.c	2026-11-08 18:34:01.386433432 +0100
+@@ -0,0 +1,46 @@
++// SPDX-License-Identifier: GPL-2.0
++/*
++ * Project Churro: an always-open lid switch for PCs that have none (desktops, mini PCs, VMs).
++ * Googlebook OS takes a missing lid switch for a closed lid (InputManager reports SW_LID as
++ * not "up" when no device has it) and its desktop services then mute all audio - master mute
++ * in the audio HAL, every output incl. Bluetooth - waiting for a "lid opened" that never comes.
++ * Not registered when the ACPI tables have a lid (PNP0C0D): laptops keep only their real
++ * switch. churro.fakelid=0 on the kernel cmdline disables it.
++ */
++#include <linux/acpi.h>
++#include <linux/init.h>
++#include <linux/input.h>
++
++static bool churro_fakelid = true;
++
++static int __init churro_fakelid_setup(char *str)
++{
++	return kstrtobool(str, &churro_fakelid) == 0;
++}
++__setup("churro.fakelid=", churro_fakelid_setup);
++
++static int __init churro_lid_init(void)
++{
++	struct input_dev *dev;
++	int err;
++
++	if (!churro_fakelid || acpi_dev_present("PNP0C0D", NULL, -1))
++		return 0;
++	dev = input_allocate_device();
++	if (!dev)
++		return -ENOMEM;
++	dev->name = "Churro Lid Switch (always open)";
++	dev->phys = "churro/lid";
++	dev->id.bustype = BUS_VIRTUAL;
++	input_set_capability(dev, EV_SW, SW_LID);
++	err = input_register_device(dev);
++	if (err) {
++		input_free_device(dev);
++		return err;
++	}
++	input_report_switch(dev, SW_LID, 0);	/* 0 = open */
++	input_sync(dev);
++	pr_info("churro-lid: no ACPI lid, registered an always-open lid switch\n");
++	return 0;
++}
++late_initcall(churro_lid_init);

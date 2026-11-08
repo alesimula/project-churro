@@ -421,7 +421,11 @@ Intel machine on `native` (the MSI too).
 
 **Audio** (`features/audio-generic`, docs/03). Covered today: HD-audio codecs on legacy
 `snd_hda_intel` (`PCH`, `Generic`/`Generic_1`, `Intel`) and on SOF's generic HDA machine
-(`sofhdadsp`). Not covered, each needs its own `mk` line in `patch-vendor.sh` and usually mixer
+(`sofhdadsp`). **PCs without a lid switch** (desktops, mini PCs, VMs): Googlebook's desktop
+services take a missing lid switch for a closed lid and master-mute the audio HAL at boot (every
+output, Bluetooth too), waiting for a "lid opened" that never comes; the kernel patch
+`kmod/patches/churro-lid.patch` registers an always-open lid switch when ACPI has no lid
+(`PNP0C0D`); `churro.fakelid=0` turns it off. Not covered, each needs its own `mk` line in `patch-vendor.sh` and usually mixer
 setup in `mixer_paths.xml` (the controls these codecs need to route sound, which HDA does on its own):
 | Gap | Typical machines | What it needs |
 |---|---|---|
