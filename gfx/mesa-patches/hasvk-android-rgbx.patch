@@ -1,0 +1,14 @@
+--- a/src/intel/vulkan_hasvk/anv_android.c
++++ b/src/intel/vulkan_hasvk/anv_android.c
+@@ -37,7 +37,10 @@
+ {
+    switch (android_format) {
+    case AHARDWAREBUFFER_FORMAT_R8G8B8X8_UNORM:
+-      return VK_FORMAT_R8G8B8_UNORM;
++      /* Churro: was VK_FORMAT_R8G8B8_UNORM (24-bit, not renderable on Intel): Chrome's opaque
++       * shared images failed ("could not create backing", GPU process restart loop). RGBX8 is
++       * 32-bit; Mesa's common vk_android.c (anv) maps it to R8G8B8A8 too. */
++      return VK_FORMAT_R8G8B8A8_UNORM;
+    case AHARDWAREBUFFER_FORMAT_Y8Cb8Cr8_420:
+       return VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+    case AHARDWAREBUFFER_FORMAT_IMPLEMENTATION_DEFINED:

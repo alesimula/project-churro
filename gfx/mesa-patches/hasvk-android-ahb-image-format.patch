@@ -1,0 +1,24 @@
+--- a/src/intel/vulkan_hasvk/anv_formats.c
++++ b/src/intel/vulkan_hasvk/anv_formats.c
+@@ -1517,11 +1517,16 @@
+           * requires support for VK_IMAGE_TILING_OPTIMAL. Android systems
+           * communicate the image's memory layout through backdoor channels.
+           */
+-         if (ahw_supported && external_props) {
+-            external_props->externalMemoryProperties = android_image_props;
+-            if (anv_ahb_format_for_vk_format(base_info->format)) {
+-               external_props->externalMemoryProperties.externalMemoryFeatures |=
+-                  VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT;
++         /* Churro: VkExternalImageFormatProperties is optional output; without it this
++          * returned FORMAT_NOT_SUPPORTED, so Chrome couldn't create any AHB-backed image
++          * (GPU process restart loop). anv (vk_android.c) doesn't require it either. */
++         if (ahw_supported) {
++            if (external_props) {
++               external_props->externalMemoryProperties = android_image_props;
++               if (anv_ahb_format_for_vk_format(base_info->format)) {
++                  external_props->externalMemoryProperties.externalMemoryFeatures |=
++                     VK_EXTERNAL_MEMORY_FEATURE_EXPORTABLE_BIT;
++               }
+             }
+             break;
+          }

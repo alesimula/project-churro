@@ -507,6 +507,8 @@ Order:
 
 None of this replaces what exists; each step is additive.
 
+**Intel Gen7-8 Vulkan (hasvk) on Android:** two Mesa fixes make Chrome's AHardwareBuffer-backed images work (RGBX8 format mapping, AHB image-format query without the optional output struct): `gfx/mesa-patches/hasvk-android-*.patch` (docs/02, 2026-11-09). minigbm still can't allocate R8/RG8/YUV420 with GPU usage on i915 Gen8 (`AHardwareBuffer_isSupported` says so, Chrome copes).
+
 ### Graphics allocator (`gfx-minigbm`)
 
 Why it's needed even for Intel: Google's minigbm (`libminigbm_gralloc.so`, used by the allocator
