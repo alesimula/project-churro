@@ -263,6 +263,53 @@ files get a sibling's label or an explicit one.
   `snd-hda-codec-*` driver before `snd_hda_intel` / `snd_sof_intel_hda(_generic)`: the controller
   binds a driver to each codec right after finding it and gives up without one ("Cannot probe
   codecs"); Linux autoloads them via `request_module`, Android can't (Google softdeps its one codec).
+* `display-density` (default) — the default screen density (`ro.sf.lcd_density`) computed from
+  the PC's main screen instead of the image's fixed value (each Googlebook image sets it for its
+  own panel; the Lenovo's: 240 for 2880x1800 15.3", ~222 dpi). With 240 a 1366x768 laptop got a
+  512 dp tall screen: apps switch to phone layouts below 600 dp (Chrome's, whose address bar
+  crashed). `patch-vendor.sh` deletes the value from vendor `build.prop` (kept as the no-screen
+  fallback; an image without one just gets no fallback), warns if another partition's
+  `build.prop` sets it too (that one would win: remove it there), and installs two programs,
+  run by `churro-density.rc` with `exec_start` at `on post-fs` (SurfaceFlinger, class core,
+  starts at `on boot` and reads the property once):
+  - `/vendor/bin/churro-drm` (static C, `churro-drm.c`) asks the GPU drivers for their screens
+    through the DRM API, like the display HAL does, and lists every connected output with its
+    type (built-in = eDP/LVDS/DSI/DPI), preferred mode and size in mm *as the kernel decoded the
+    EDID* (its screen-size field, whole cm: the MSI's 345 mm panel reads 350 → 200 instead of 204). First it waits (max 5 s) until every PCI display device has its
+    DRM driver, or a built-in panel is connected (it wins anyway; on hybrid laptops the GPU
+    without the panel can be ready first). Outputs still "unknown" (drivers without a
+    framebuffer console, like Google's `xe`, don't probe them until the display HAL starts:
+    no status, no EDID) get `detect` written to their sysfs `status`, which makes the driver
+    probe them whoever holds the device (the DRM API alone only probes for the DRM master);
+    the names come from the driver, so no fixed list. Failures go to the boot log.
+  - `/vendor/bin/churro-density` (sh) takes the built-in panel, else the first monitor, else
+    simpledrm, and sets density = dpi × 240/222: a fixed physical UI size (the Lenovo
+    Googlebook's), independent of the image it's built from, so its own panel gets 240 again.
+    Then: at least 160 (1 dp = 1 px; desktop monitors), at most what keeps 600 dp on the short
+    side, rounded down to a multiple of 4; no size (VMs) → 160 within the same cap. Its result
+    line goes to the boot log (written to `/dev/kmsg`: init's `stdio_to_kmsg` uses
+    `/dev/kmsg_debug`, which only debug builds have): `churro-density: card0-eDP-1 2560x1600
+    350mm -> 200`. Examples (all in `churro-density-test.sh`, a self-check with a stub `churro-drm`):
+    1366x768 13.3" → 160, 1920x1080 24" monitor → 160, MSI 2560x1600 16" → 204, 4K 27" → 176.
+
+  Why the kernel's sizes and not our own EDID parsing (the first version read `/sys/class/drm/*/edid`
+  and its first detailed timing): the MSI Vector 16's panel declares 640x400 mm there when driven
+  by the NVIDIA GPU (MUX mode; via the Intel GPU it says 345x215); the EDID's screen-size field
+  (35x22 cm, which the kernel reports) and its DisplayID block (345x215 mm, which Android's
+  display stack uses for its dpi) are right. Both programs run in `get_variant_audio`'s domain
+  (Google ships no program for it; audio-generic's script uses it too): Google's policy lets it
+  set `vendor.audio.*`, and `patch-vendor.sh` adds `/dev/dri` (`gpu_device`), writing sysfs
+  files (`detect`; Google's policy forbids that only to apps) and the boot log (`kmsg_device`)
+  to the vendor policy (SELinux stays enforcing), and silences the kernel's harmless
+  CAP_SYS_ADMIN check on opening a DRM device. So the script sets `vendor.audio.churro.density`
+  and the rc copies it with one `on late-fs && property:vendor.audio.churro.density=<d>` action per
+  value (100–640, step 4; only init/vendor_init may set `ro.sf.lcd_density`, and vendor_init
+  can't read `vendor.audio.*` for `${...}`). Not plain `on property:` triggers: init enables
+  property triggers only after queueing all of late-init's stages, so they ran after `on boot`
+  (first T300FA test: still 240). No screen found → nothing set and a final `on late-fs` sets the
+  image's value (if it had one). Settings > Display size still works: its steps are computed from
+  this value and stored as a `wm density` override (an absolute dpi, so a stick moved to another
+  PC keeps the size picked on the first).
 * `gfx-minigbm` (default) — the graphics buffer allocator libraries (`libminigbm_gralloc.so`,
   `libgbm.so`) rebuilt from AOSP `external/minigbm` (android17-release, the source of Google's
   own build) by `gfx/build-minigbm.sh` with the NDK, plus `gfx/minigbm-patches/`. Google's build
@@ -420,7 +467,11 @@ it in order; each step says where the assumption lives and how to check it.
 1. **Build once and read the log** (`churro.sh auto`). Hard failures name their cause:
    kernel patch doesn't apply → "When the kernel source changes" (§2); kABI differences → the
    driver-set checklist above; `minigbm`/`libgbm` "symbol missing" → `gfx/build-minigbm.sh`
-   (AOSP branch must match the image's Android release); `audio-generic: no board audio config`.
+   (AOSP branch must match the image's Android release); `audio-generic: no board audio config`;
+   `check-sepolicy: the SELinux policy doesn't compile` (features' rules in `vendor_sepolicy.cil`
+   vs the new image's policy: secilc's message names the rule; `tools/check-sepolicy.sh` compiles
+   it like init does, with a pinned upstream secilc, `SELINUX_VER`, minus Android-only lines).
+   Warnings: `display-density: WARNING ro.sf.lcd_density=… in <partition>` (the density stays fixed).
 2. **Android release pins** (only change with a new Android version, not a new build):
    - software KeyMint: `CHURRO_EMU_URL`/`CHURRO_EMU_SHA1` at the top of
      `features/security-software/patch-vendor.sh` = Google's public x86_64 emulator system image

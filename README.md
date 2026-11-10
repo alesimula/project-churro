@@ -103,7 +103,8 @@ auto-mounts USB drives: internal and secondary disks stay untouched.
    adds to vendor_dlkm after an ABI check; Android loads them by device ID, like udev.
    `features/firmware-extra` adds their firmware (linux-firmware, Intel SOF audio, regulatory.db);
    `features/audio-generic` points Google's audio HAL at the PC's HD-audio card instead of the
-   Lenovo board's.
+   Lenovo board's; `features/display-density` sets the screen density from the PC's panel at
+   boot instead of the Lenovo's fixed 240.
    Updating them: checklist in docs/03, "Updating the driver set and firmware"; for a newer
    recovery image or another Googlebook's image: docs/03, "Moving to a newer recovery image".
    **Older CPUs**: the image's userspace is compiled for Panther Lake, so CPUs older than Arrow
@@ -138,9 +139,9 @@ from source.
 | `churro.sh` | `auto` / `build` / `install` |
 | `versions.env` | every pinned version the build downloads (kernel driver config, firmware, Mesa, NDK, emulator image, BoringSSL, tools), one section each |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
-| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `libs-generic`, `setup-no-ota`, `debug-log` (all default), `security-trusty-vm` (experimental) |
+| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `display-density`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `libs-generic`, `setup-no-ota`, `debug-log` (all default), `security-trusty-vm` (experimental) |
 | `crypto/` | BoringSSL builds for Android (`build-boringssl.sh` platform copy, `build-boringssl-httpengine.sh` HttpEngine's) |
 | `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`, `patches/` incl. the `vex-emulate` instruction emulator), out-of-tree pack builds |
 | `gfx/` | Mesa and minigbm (graphics allocator) builds for Android |
-| `tools/` | `prepare.sh` (fetch + build everything), `updater/` (check for and apply Google's updates to the recovery image), module packs, QEMU helpers, `vexemu/` + `vextest/` (emulator source and tests), dev helpers |
+| `tools/` | `prepare.sh` (fetch + build everything), `check-sepolicy.sh` (the build compiles the patched SELinux policy as init will at boot, and stops if it doesn't), `updater/` (check for and apply Google's updates to the recovery image), module packs, QEMU helpers, `vexemu/` + `vextest/` (emulator source and tests), dev helpers |
 | `docs/` | analysis, bring-up log, architecture, device notes; `docs/notes/` = scratch |

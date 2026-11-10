@@ -111,6 +111,7 @@ cmd_build() {
         if [ -d "$f/$p" ] || [ -f "$f/patch-$p.sh" ]; then erofs_repack "$(part super)" "${p}_a" "$mp" "${fdirs[@]}"; break; fi
       done
     done
+    bash "$HERE/tools/check-sepolicy.sh" "$(part super)"
   fi
 
   log "building Churro ramdisk"
@@ -257,7 +258,7 @@ cmd_auto() {
     [ "$p" != i915 ] || die "the i915 pack is retired (it broke xe on Gen12+): i915 now comes with drivers-extra and only loads on Intel GPUs xe doesn't drive"
     [ -d "$CHURRO_PACK_DIR/$p" ] || die "no module pack '$p' in $CHURRO_PACK_DIR"; margs+=(--modules "$CHURRO_PACK_DIR/$p"); done
   [ "$gfx" = auto ] || CHURRO_EXTRA_ARGS="androidboot.churro.gfx=$gfx ${CHURRO_EXTRA_ARGS:-}"
-  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,debug-log$xfeat" "${margs[@]}"
+  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density,debug-log$xfeat" "${margs[@]}"
 }
 
 case ${1:-} in auto|build|install) deps_ensure ;; esac

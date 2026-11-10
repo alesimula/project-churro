@@ -41,7 +41,14 @@ deps_ensure() {
   fi
   # erofs-utils that can extract SELinux xattrs isn't packaged (Ubuntu 24.04 has 1.7.1): built once
   # into tools/bin, which is not in git (a fresh clone or zip doesn't have it).
-  [ "$erofs" = 1 ] || return 0
-  echo ">> building erofs-utils into tools/bin (once)" >&2
-  bash "$DEPS_ROOT/tools/build-erofs-utils.sh" >&2
+  if [ "$erofs" = 1 ]; then
+    echo ">> building erofs-utils into tools/bin (once)" >&2
+    bash "$DEPS_ROOT/tools/build-erofs-utils.sh" >&2
+  fi
+  # secilc that reads Google's policy (Ubuntu 24.04 has 3.5, needs >= 3.8): same, for the build's
+  # SELinux check (tools/check-sepolicy.sh)
+  local sv; sv=$(. "$DEPS_ROOT/versions.env"; echo "$SELINUX_VER")
+  [ "${1:-}" != updater ] && [ "$(cat "$b/secilc.version" 2>/dev/null)" != "$sv" ] || return 0
+  echo ">> building secilc $sv into tools/bin" >&2
+  bash "$DEPS_ROOT/tools/build-secilc.sh" >&2
 }

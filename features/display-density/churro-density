@@ -1,0 +1,26 @@
+#!/vendor/bin/sh
+# Project Churro display-density: the main screen's default density (ro.sf.lcd_density), computed
+# at boot. UI size: Googlebook's, whatever image this is built from (Lenovo Googlebook 15:
+# density 240 on a 222 dpi panel, 2880x1800 / 330 mm), i.e. density = dpi * 240/222.
+# Screens and sizes come from churro-drm (the GPU drivers, as the kernel decoded the EDID); the
+# built-in panel wins, then a monitor, then the firmware framebuffer. Writes one line to the boot
+# log (/dev/kmsg; init's stdio_to_kmsg only works on debug builds) and sets
+# vendor.audio.churro.density: this runs in get_variant_audio's
+# domain (may set vendor.audio.*); only init/vendor_init may set ro.sf.lcd_density, so
+# churro-density.rc copies it. Nothing found: sets nothing (the rc keeps the image's value).
+[ -w /dev/kmsg ] && exec 2>/dev/kmsg   # our line and churro-drm's errors -> boot log
+out=$(${CHURRO_DRM:-/vendor/bin/churro-drm})
+pick() { echo "$out" | while read k w h mw mh n; do [ "$k" = "$1" ] && { echo "$w $h $mw $n"; break; }; done; }
+s=$(pick panel); [ -n "$s" ] || s=$(pick ext); [ -n "$s" ] || s=$(pick fw)
+[ -n "$s" ] || { echo "churro-density: no screen" >&2; exit 0; }
+set -- $s; w=$1 h=$2 mm=$3
+short=$((w < h ? w : h)) d=160
+# dpi * 240/222 with dpi = w * 25.4 / mm: w * 3048 / (mm * 111), rounded; no size = unknown
+[ $mm -ge 100 ] && d=$(((w * 6096 / (mm * 111) + 1) / 2))
+[ $d -lt 160 ] && d=160   # desktop monitors, low-dpi panels: not below 1 dp = 1 px
+# keep >= 600 dp on the short side: below it Chrome uses its phone layout (its omnibox crashes)
+[ $short -gt 0 ] && [ $d -gt $((short * 160 / 600)) ] && d=$((short * 160 / 600))
+d=$((d / 4 * 4))          # churro-density.rc has a trigger per multiple of 4
+[ $d -lt 100 ] && d=100; [ $d -gt 640 ] && d=640
+echo "churro-density: $4 ${w}x$h ${mm}mm -> $d" >&2
+setprop vendor.audio.churro.density $d
