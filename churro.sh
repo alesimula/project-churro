@@ -208,14 +208,15 @@ EOF
   log "kernel cmdline: flash read-only, no TPM, no UEFI crash dumps, IOMMU passthrough, blacklisted: $blk"
 
   log "populating EFI-SYSTEM"
-  esp_build "$(part EFI-SYSTEM)" "$W" "$vcmd" "$bsrc"
+  esp_build "$(part EFI-SYSTEM)" "$W" "$vcmd" "$bsrc" "${ln:+${LOOP}p$ln}"
   rm -rf "$W"
   log "done: $out"
 }
 
 # install <churro.img> <target disk>: the image already has the Googlebook *installed* layout
 # (same as partition-script.sh writes), so: copy it, move the backup GPT to the end of the disk,
-# stretch userdata (partition 1, placed last) over the free space, mark the ESP boot as internal.
+# stretch userdata (partition 1, placed last) over the free space, give the disk its own GUIDs,
+# mark the ESP boot as internal.
 # Android formats userdata/metadata itself on first boot ("formattable").
 cmd_install() {
   local img=$1 dst=$2
@@ -229,6 +230,9 @@ cmd_install() {
   log "writing image"; dd if="$img" of="$dst" bs=4M conv=fsync,sparse status=progress
   log "growing userdata to the end of the disk"
   userdata_last "$dst"; grow_userdata "$dst"
+  # new disk + partition GUIDs: Android finds its disk by the ESP's (androidboot.boot_part_uuid),
+  # and a copy of the stick's would be ambiguous with the stick plugged in
+  sgdisk -G "$dst" >/dev/null
   partprobe "$dst" 2>/dev/null || blockdev --rereadpt "$dst" || true; sleep 2
   local espn esp mnt; espn=$(sgdisk -p "$dst" | awk '$NF == "EFI-SYSTEM" {print $1}')
   case $dst in *[0-9]) esp=${dst}p$espn ;; *) esp=$dst$espn ;; esac   # nvme0n1p12 vs sda12

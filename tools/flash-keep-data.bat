@@ -84,6 +84,10 @@ function WslUsbDisks { @(wsl.exe -d $distro -u root -- lsblk -dnbo NAME,SIZE,TRA
   $p = "$_".Trim() -split '\s+'; if ($p.Count -eq 3 -and $p[2] -eq 'usb') { "$($p[0]) $($p[1])" } }) }
 wsl.exe -d $distro -u root -- modprobe -a usb-storage uas 2>$null
 $before = WslUsbDisks
+  # Windows must write its pending changes to the stick's drives (CHURRO-LOG) first: usbipd takes
+  # the device away without that, and WSL then writes on a half-updated FAT (seen: a file deleted
+  # in Windows just before, then a corrupted boot loader copy on CHURRO-LOG)
+  Get-Partition -DiskNumber $row.Disk | Where-Object DriveLetter | ForEach-Object { Write-VolumeCache -DriveLetter $_.DriveLetter }
   usbipd attach --wsl --busid $busid
   if ($LASTEXITCODE -ne 0) { Fail "usbipd attach --busid $busid failed" }
   $attached = $true

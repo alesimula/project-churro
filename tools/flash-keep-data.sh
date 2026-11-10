@@ -53,4 +53,21 @@ grep -vE " $KEEP$" "$T/img" | while read -r s n name; do
   pos=$((s + n))
 done
 sync
+# CHURRO-LOG keeps its logs but gets the new GRUB from the ESP just written (lib/esp.sh: firmware
+# boot menus list it before the ESP). Best effort: the update itself is done.
+esp=$(awk '$3 == "EFI-SYSTEM" {print $1, $2}' "$T/img"); lg=$(awk '$3 == "CHURRO-LOG" {print $1, $2}' "$T/dev")
+if [ -n "$esp" ] && [ -n "$lg" ]; then
+  E=$(mktemp -d) L=$(mktemp -d)
+  read -r es en <<< "$esp"; read -r ls_ lnn <<< "$lg"
+  note="note: CHURRO-LOG's boot loader not updated (its firmware boot entry may do nothing)"
+  if mount -o ro,offset=$((es * 512)),sizelimit=$((en * 512)) "$DEV" "$E"; then
+    if mount -o offset=$((ls_ * 512)),sizelimit=$((lnn * 512)) "$DEV" "$L"; then
+      mkdir -p "$L/EFI/BOOT" && cp "$E/EFI/BOOT/BOOTX64.EFI" "$L/EFI/BOOT/" && echo ">> CHURRO-LOG: boot loader updated" ||
+        echo "$note"
+      umount "$L"
+    else echo "$note"; fi
+    umount "$E"
+  else echo "$note"; fi
+  rmdir "$E" "$L"
+fi
 echo "done: boot it; Android keeps its data and apps"

@@ -364,7 +364,7 @@ files get a sibling's label or an explicit one.
   start `/churro/logger` (static, `features/debug-log/logger.c`) as `rdinit`: it forks a child
   (own mount namespace, invisible to first-stage init) that copies `/dev/kmsg` — kernel + Android
   init messages — into `boot.log` on the **CHURRO-LOG** partition (the unused KERN-A slot turned
-  into a FAT32 basic-data partition; the ESP is hidden by Windows), fsync'ed per batch so a hang
+  into a FAT32 basic-data partition; the ESP is hidden by Windows), which also holds a copy of GRUB (`EFI/BOOT/BOOTX64.EFI`: firmware boot menus list every FAT partition of a USB disk, CHURRO-LOG = partition 2 before the ESP's 12; its stub finds `/churro/grub.cfg` on the ESP of the same disk; `flash-keep-data` refreshes the copy while keeping the logs), fsync'ed per batch so a hang
   + power button keeps it; then execs the real `/init`. `boot.log`/`boot.prev.log` are created
   by the build at 64 MiB, filled with blank lines, and only overwritten in place (text ends at the
   first empty line; rotation copies in place too), so FAT and directory entries never change at
@@ -391,7 +391,9 @@ files get a sibling's label or an explicit one.
 ### 5. Installer
 The recovery image already has the installed layout, so `churro.sh install <img> <disk>` (from
 any Linux live) writes the image, moves the backup GPT to the disk end, grows userdata over the
-free space and sets `boot_source=internal` on the ESP. TODO: an installer inside the booted image.
+free space, gives the disk new GUIDs (`sgdisk -G`: Android finds its disk by the ESP's partition
+UUID, so a copy of the stick's would be ambiguous with the stick plugged in) and sets
+`boot_source=internal` on the ESP. TODO: an installer inside the booted image.
 
 ## Updating the driver set and firmware (checklist, no prior context needed)
 

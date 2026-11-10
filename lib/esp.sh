@@ -3,8 +3,10 @@
 # Googlebooks boot through depthcharge, which never touches the ESP, so we own it.
 
 # esp_build <esp block device> <stage dir with kernel, initrd.img> <vendor cmdline> <boot_source>
+#   [log partition]: also gets GRUB (firmware boot menus list every FAT partition of a USB disk,
+#   CHURRO-LOG = partition 2 before the ESP's 12: without it, that entry boots nothing)
 esp_build() {
-  local dev=$1 stage=$2 vcmd=$3 bsrc=$4 mnt
+  local dev=$1 stage=$2 vcmd=$3 bsrc=$4 logp=${5:-} mnt
   mkfs.vfat -n CHURRO "$dev" >/dev/null
   mnt=$(mktemp -d); mount "$dev" "$mnt"
   mkdir -p "$mnt/EFI/BOOT" "$mnt/churro"
@@ -13,7 +15,12 @@ esp_build() {
   local stub; stub=$(mktemp)
   cat > "$stub" <<'EOF'
 regexp --set=1:root '^\(([^)]+)\)' "$cmdpath"
-if [ -z "$root" -o ! -f "($root)/churro/grub.cfg" ]; then search --no-floppy --file --set=root /churro/grub.cfg; fi
+if [ -z "$root" -o ! -f "($root)/churro/grub.cfg" ]; then
+  # started from CHURRO-LOG: the ESP of the same disk first (not another Churro disk's)
+  regexp --set=1:disk '^([^,]+)' "$root"
+  if [ -n "$disk" ]; then search --no-floppy --file --set=root --hint="$disk," /churro/grub.cfg
+  else search --no-floppy --file --set=root /churro/grub.cfg; fi
+fi
 echo "Churro: cmdpath=$cmdpath root=$root"
 configfile "($root)/churro/grub.cfg"
 EOF
@@ -21,6 +28,10 @@ EOF
     --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop efi_uga probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
     --locales="" --fonts="" "boot/grub/grub.cfg=$stub"
   rm -f "$stub"
+  if [ -n "$logp" ]; then
+    local lm; lm=$(mktemp -d); mount "$logp" "$lm"
+    mkdir -p "$lm/EFI/BOOT"; cp "$mnt/EFI/BOOT/BOOTX64.EFI" "$lm/EFI/BOOT/"; umount "$lm"; rmdir "$lm"
+  fi
 
   cp "$stage/kernel" "$mnt/churro/kernel"
   cp "$stage/initrd.img" "$mnt/churro/initrd.img"
