@@ -35,6 +35,8 @@ EOF
 
   cp "$stage/kernel" "$mnt/churro/kernel"
   cp "$stage/initrd.img" "$mnt/churro/initrd.img"
+  # what this build is (churro.sh): the installer's update shows the old and the new one
+  if [ -f "$stage/build.txt" ]; then cp "$stage/build.txt" "$mnt/churro/build.txt"; fi
 
   # env.cfg is the per-install knob file (the installer flips boot_source to internal).
   cat > "$mnt/churro/env.cfg" <<EOF
@@ -58,6 +60,30 @@ if [ \"\$igpu\" = \"8086\" ]; then if regexp '^0*($xere)\$' \"\$igpudev\"; then 
   if [ -n "$xesel" ] && [ -s "${CHURRO_HASVK_IDS:-}" ]; then
     local hre; hre=$({ tr 'A-F' 'a-f' < "$CHURRO_HASVK_IDS"; tr 'a-f' 'A-F' < "$CHURRO_HASVK_IDS"; } | sort -u | paste -sd'|')
     vksel="if [ \"\$gfx\" = mesa ]; then if regexp '^0*($hre)\$' \"\$igpudev\"; then set vk=intel_hasvk; else set vk=intel; fi; set vk=\"androidboot.churro.vulkan=\$vk\"; fi"
+  fi
+  # features/disk-install: the installer runs instead of Android, on the firmware framebuffer
+  # (nomodeset: a GPU driver would take the text console away; Google's xe has none), logged to
+  # CHURRO-LOG like the debug entries. Not offered on an installed disk.
+  local inst=""
+  if [ -n "${CHURRO_INSTALLER:-}" ]; then
+    inst=$(cat <<'EOF'
+if [ "$boot_source" != internal ]; then
+submenu "Install to an internal disk" {
+  menuentry "Update an install (keeps Android's data and apps)" {
+    echo "Starting the installer: the screen stays black for some seconds..."
+    linux ($root)/churro/kernel $base $extra_args nomodeset androidboot.churro.install=update @DBG@
+    initrd ($root)/churro/initrd.img
+  }
+  menuentry "New install (ERASES the disk you pick there)" {
+    echo "Starting the installer: the screen stays black for some seconds..."
+    linux ($root)/churro/kernel $base $extra_args nomodeset androidboot.churro.install=new @DBG@
+    initrd ($root)/churro/initrd.img
+  }
+}
+fi
+EOF
+)
+    inst=${inst//@DBG@/${CHURRO_DEBUG_ARGS:-}}
   fi
   cat > "$mnt/churro/grub.cfg" <<EOF
 # Project Churro boot menu. Kernel cmdline = Googlebook vendor_boot cmdline + Churro additions.
@@ -134,6 +160,7 @@ submenu "Graphics: other stacks" {
     initrd (\$root)/churro/initrd.img
   }
 }
+$inst
 menuentry "UEFI firmware settings" { fwsetup }
 EOF
   sync; umount "$mnt"; rmdir "$mnt"

@@ -1,0 +1,177 @@
+#!/system/bin/sh
+# Project Churro disk-install: install the running Churro stick to an internal disk, or update an
+# install there keeping Android's data. churro-install.rc runs it instead of the rest of the boot
+# when a boot entry sets androidboot.churro.install=new|update: hardware is up (ueventd), nothing
+# else runs yet, text UI on the firmware framebuffer (the entries boot with nomodeset). Tools are
+# Android's own: toybox, and sgdisk, which there only knows long options (--print, not -p: its
+# popt is a getopt_long stand-in), always as --option=value.
+# new: the stick's partition table, userdata re-created up to the end of the target, new GUIDs
+#   (Android finds its disk by the ESP's UUID: a copy would be ambiguous with the stick plugged
+#   in); every partition copied except Android's state (userdata, metadata, security state,
+#   misc), which is cleared: Android formats it on first boot. boot_source=internal on the ESP.
+# update: only disks with the stick's layout (userdata may be bigger); everything rewritten
+#   except that state and the logs, like tools/flash-keep-data.sh.
+# mksh arithmetic is 32-bit: sector counts of whole disks only go through awk or string tests.
+# Self-check: churro-install-test.sh (CHURRO_INSTALL_SRC / _DISKS / _MINDATA replace the running
+# disk, the disks to offer and the minimum userdata size in MiB).
+mode=${1:-$(getprop ro.boot.churro.install)}
+trap '' INT QUIT TSTP   # a stray Ctrl-C must not leave a half-written disk
+mindata=${CHURRO_INSTALL_MINDATA:-12288}   # Android + Google apps need room on first boot
+T=$(mktemp -d 2>/dev/null) || T=/dev/churro-install.$$   # no /data yet at boot
+mkdir -p $T/mnt $T/log
+
+node() { [ -b /dev/block/$1 ] && echo /dev/block/$1 || echo /dev/$1; }   # Android | Linux
+part() { case $1 in *[0-9]) node ${1}p$2 ;; *) node $1$2 ;; esac; }
+say() { echo "$*"; { echo "churro-install: $*" > /dev/kmsg; } 2>/dev/null; }
+# the only way out: never carry on into Android from here
+finish() {
+  sync; umount $T/mnt $T/log 2>/dev/null
+  say "$1"; printf '\nPress Enter to power off. '; read -r x1
+  reboot -p && sleep 20; exit ${2:-0}
+}
+die() { finish "ERROR: $*" 1; }
+
+# "<n> <start> <end> <name>" per partition; layout = the same with userdata as just its start
+table() { sgdisk --print "$(node $1)" 2>/dev/null | while read -r n s e x1 x2 x3 name; do
+  case $n in ''|*[!0-9]*) continue ;; esac; echo "$n $s $e $name"; done; }
+layout() { table $1 | while read -r n s e name; do
+  [ "$name" = userdata ] && echo "userdata $s" || echo "$n $s $e $name"; done; }
+guid() { sgdisk --print "$(node $1)" 2>/dev/null | sed -n 's/^Disk identifier (GUID): //p'; }
+sectors() { cat /sys/block/$1/size 2>/dev/null || echo 0; }
+gib() { awk "BEGIN { printf \"%.1f GiB\", $1 / 2097152 }"; }
+model() {  # "SanDisk 3.2Gen1 (sdb, 114.6 GiB, 30 partitions)"
+  m=$(cat /sys/block/$1/device/vendor /sys/block/$1/device/model /sys/block/$1/device/name 2>/dev/null | head -2)
+  echo ${m:-disk} "($1, $(gib $(sectors $1)), $(table $1 | wc -l) partitions)"; }
+in_use() {  # mounted, or under device-mapper (the running system's super)
+  grep -q -E "^$(node $1)p?[0-9]* " /proc/mounts && return 0
+  for h in /sys/block/$1/holders/* /sys/block/$1/*/holders/*; do [ -e "$h" ] && return 0; done
+  return 1
+}
+# version of the Churro on disk $1 (churro/build.txt on its ESP) -> $ver, $inc (Google's build number)
+version() {
+  ver="unknown version"; inc=
+  mount -t vfat -o ro "$(part $1 $espn)" $T/mnt 2>/dev/null || return
+  if [ -f $T/mnt/churro/build.txt ]; then
+    inc=$(sed -n 's/^INCREMENTAL=//p' $T/mnt/churro/build.txt)
+    ver="Googlebook OS $(sed -n 's/^BUILD_ID=//p' $T/mnt/churro/build.txt) ($inc), Churro build $(sed -n 's/^CHURRO_BUILT=//p' $T/mnt/churro/build.txt)"
+  fi
+  umount $T/mnt
+}
+disks() {
+  [ -n "$CHURRO_INSTALL_DISKS" ] && { echo $CHURRO_INSTALL_DISKS; return; }
+  for d in /sys/block/*; do d=${d##*/}
+    case $d in loop*|ram*|zram*|dm-*|sr*|md*|mmcblk*boot*|mmcblk*rpmb) ;; *) echo $d ;; esac
+  done
+}
+why_not() {  # why disk $1 can't be the target; nothing = it can
+  [ "$1" = "$src" ] && { echo "the disk Churro is running from"; return; }
+  in_use $1 && { echo "in use"; return; }
+  [ "$(cat /sys/block/$1/queue/logical_block_size 2>/dev/null)" = 512 ] || { echo "4K-sector disk: not supported"; return; }
+  if [ "$mode" = update ]; then
+    [ "$(layout $1)" = "$slayout" ] && return
+    table $1 | grep -q ' super$' && echo "a Churro of another layout: needs a new install" || echo "no Churro install on it"
+  else
+    awk "BEGIN { exit !($(sectors $1) >= $us + $mindata * 2048) }" ||
+      echo "too small: needs $(gib $((us + mindata * 2048)))"
+  fi
+}
+run() {  # run <what failed> <command...>: a failed write ends the install, with the tool's message
+  w=$1; shift; "$@" > $T/out 2>&1 || { cat $T/out; die "$w"; }
+}
+copy() {  # copy <n> <name> <sectors>: partition n, stick -> target, 256 MiB at a time
+  a=$(part $src $1) b=$(part $t $1) blocks=$(($3 / 8192)) i=0
+  while [ $i -lt $blocks ]; do
+    c=$((blocks - i)); [ $c -gt 64 ] && c=64
+    run "copying $2 failed" dd if=$a of=$b bs=4M skip=$i seek=$i count=$c
+    i=$((i + c)); printf '\r  %s %d%%   ' $2 $((i * 100 / blocks))
+  done
+  [ $(($3 % 8192)) -eq 0 ] || run "copying $2 failed" dd if=$a of=$b bs=512 skip=$((blocks * 8192)) seek=$((blocks * 8192)) count=$(($3 % 8192))
+  printf '\r  %s done   \n' $2
+}
+zero() { run "clearing $2 failed" dd if=/dev/zero of=$(part $t $1) bs=1M count=$3; echo "  $2 cleared"; }
+
+case $mode in new) what="new install" ;; update) what="update of an existing install, keeping Android's data" ;;
+  *) die "started without a mode (androidboot.churro.install=new|update)" ;; esac
+src=$CHURRO_INSTALL_SRC
+if [ -z "$src" ]; then   # the disk of the running system = where Android found its partitions
+  p=$(readlink -f /dev/block/by-name/super); p=$(readlink -f /sys/class/block/${p##*/}); p=${p%/*}; src=${p##*/}
+fi
+[ -b "$(node "$src")" ] || die "can't find the disk Churro was started from"
+table $src > $T/tab; slayout=$(layout $src)
+set -- $(grep ' userdata$' $T/tab); un=$1 us=$2
+set -- $(grep ' EFI-SYSTEM$' $T/tab); espn=$1
+set -- $(grep ' CHURRO-LOG$' $T/tab); logn=$1
+[ -n "$us" ] && [ -n "$espn" ] || die "can't read the partition table of the disk Churro runs from ($src)"
+while read -r n s e name <&3; do   # userdata must be last: it's re-created up to the end of the disk
+  [ $s -le $us ] || die "userdata isn't the last partition of $src (not written by Churro?)"
+done 3< $T/tab
+version $src; sver=$ver sinc=$inc
+
+while :; do
+  printf '\n\nProject Churro: %s\nRunning from: %s\n              %s\n\nDisks it can go to:\n' "$what" "$(model $src)" "$sver"
+  ok= no= n=0
+  for d in $(disks); do
+    [ "$(sectors $d)" = 0 ] || [ $d = "$src" ] && continue   # empty card reader; never the running disk
+    w=$(why_not $d)
+    if [ -n "$w" ]; then no="$no    $(model $d): $w
+"; continue; fi
+    n=$((n + 1)); ok="$ok $d"; echo " $n  $(model $d)"
+    [ "$mode" = update ] && { version $d; echo "      $ver"; }
+  done
+  [ -n "$no" ] && printf '\nCan'"'"'t be used:\n%s' "$no"
+  [ $n -gt 0 ] || echo " none"
+  printf '\nNumber of the disk (Enter = cancel, r = look again): '; read -r a
+  case $a in '') finish "Cancelled: nothing was changed." ;; esac
+  t= i=0; for d in $ok; do i=$((i + 1)); [ "$i" = "$a" ] && t=$d; done
+  [ -n "$t" ] && break
+done
+
+if [ "$mode" = update ]; then
+  version $t
+  [ -z "$inc" ] || [ -z "$sinc" ] || [ "$inc" -le "$sinc" ] ||
+    finish "That disk has a newer Googlebook OS ($ver): Android's data may not work with an older one. Nothing was changed; use a new install to go back." 1
+  printf '\nUpdate %s\n  from: %s\n    to: %s\nAndroid'"'"'s data and apps are kept.\n' "$(model $t)" "$ver" "$sver"
+else
+  printf '\nThis ERASES EVERYTHING on %s:\nall its partitions and files, any other system on it.\n' "$(model $t)"
+fi
+printf 'Type YES to go on: '; read -r a
+case $a in [Yy][Ee][Ss]|[Zz][Ee][Ss]) ;; *) finish "Cancelled: nothing was changed." ;; esac   # ZES: QWERTZ keyboards
+[ -z "$(why_not $t)" ] || die "$(model $t) can't be used any more: $(why_not $t)"
+say "$what: $(model $src) -> $(model $t)"
+
+if [ "$mode" = new ]; then
+  run "can't read this disk's partition table" sgdisk --backup=$T/gpt "$(node $src)"
+  ut=$(sgdisk --print "$(node $src)" | while read -r n s e x1 x2 code name; do [ "$name" = userdata ] && echo $code; done)
+  sgdisk --zap-all "$(node $t)" > /dev/null 2>&1
+  run "can't write the partition table" sgdisk --load-backup=$T/gpt --delete=$un --new=$un:$us:0 \
+    --typecode=$un:$ut --change-name=$un:userdata --randomize-guids "$(node $t)"
+  blockdev --rereadpt "$(node $t)" 2>/dev/null
+  i=0; until [ -b "$(part $t $un)" ] || [ $i -ge 20 ]; do sleep 1; i=$((i + 1)); done
+  [ "$(layout $t)" = "$slayout" ] || die "the new partition table doesn't match this disk's"
+  echo "  partition table written"
+fi
+while read -r n s e name <&3; do
+  [ "$name" = userdata ] || sect=$((e - s + 1))   # userdata's end can be past 32 bits
+  case $name in
+    userdata) [ "$mode" = new ] && zero $n $name 16 ;;
+    metadata|desktop_security_*|frp_persist) [ "$mode" = new ] && zero $n $name $((sect / 2048)) ;;
+    misc) zero $n $name $((sect / 2048)) ;;   # may hold a boot command meant for the stick
+    CHURRO-LOG) [ "$mode" = new ] && copy $n $name $sect ;;
+    *) copy $n $name $sect ;;
+  esac
+done 3< $T/tab
+sync
+
+run "can't open the EFI partition of the target" mount -t vfat "$(part $t $espn)" $T/mnt
+run "can't set the boot source" sed -i 's/^set boot_source=.*/set boot_source=internal/' $T/mnt/churro/env.cfg
+if [ "$mode" = update ]; then
+  # CHURRO-LOG keeps its logs but gets the new GRUB (lib/esp.sh: firmware menus list it); best effort
+  [ -n "$logn" ] && mount -t vfat "$(part $t $logn)" $T/log 2>/dev/null &&
+    { mkdir -p $T/log/EFI/BOOT && cp $T/mnt/EFI/BOOT/BOOTX64.EFI $T/log/EFI/BOOT/; umount $T/log; }
+  # an install copied 1:1 from a stick (old churro.sh install) has the stick's IDs: give it its own
+  [ "$(guid $t)" != "$(guid $src)" ] || sgdisk --randomize-guids "$(node $t)" > /dev/null 2>&1
+fi
+umount $T/mnt
+finish "Done. After the power off, unplug the disk Churro was running from (the stick) and start
+the PC: if it doesn't start Churro by itself, pick the internal disk in the firmware's boot
+menu (Secure Boot off)."

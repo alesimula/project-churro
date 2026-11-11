@@ -263,6 +263,39 @@ files get a sibling's label or an explicit one.
   `snd-hda-codec-*` driver before `snd_hda_intel` / `snd_sof_intel_hda(_generic)`: the controller
   binds a driver to each codec right after finding it and gives up without one ("Cannot probe
   codecs"); Linux autoloads them via `request_module`, Android can't (Google softdeps its one codec).
+* `disk-install` (default) — install to an internal disk from the stick, no other PC needed.
+  `lib/esp.sh` adds a submenu "Install to an internal disk" (not on an installed disk:
+  `boot_source=internal`) with "Update an install" and "New install": the normal entry plus
+  `androidboot.churro.install=new|update`, `nomodeset` (a GPU driver would take the text console
+  away; Google's `xe` has none) and the boot logger. `churro-install.rc` then runs
+  `/vendor/bin/churro-install` with `exec_start` at `on init`, on `tty0` (`console`): ueventd has
+  loaded the drivers by then (disks, keyboard; atkbd/USB HID/fbcon are built in), nothing else
+  runs, and the boot never goes on (the script ends with a power off). It is a shell script on
+  Android's own tools (toybox, and `sgdisk`, which on Android only takes long options: its popt
+  is a getopt_long stand-in), not Google's `android-desktop-install` (docs/01 §5:
+  needs the GSC, Lenovo's disk paths, a root shell). Source = the disk of the running system
+  (`/dev/block/by-name/super`), never listed; targets = every other disk not in use, numbered,
+  with vendor/model, size and partition count (for an update: the version on it); the rest
+  listed with the reason (too small, 4K sectors, in use, no/other Churro layout). The disk is
+  always picked by number, even if there is only one, then "Type YES" before anything is written.
+  - **New**: `sgdisk --backup` of the stick's table, loaded on the target with userdata
+    re-created up to its end and new GUIDs (`-l … -d -n -G`: works for smaller and bigger
+    disks; needs userdata start + 12 GiB); every partition copied except userdata, metadata,
+    `desktop_security_*`, `frp_persist` and misc, which are cleared (Android formats them on
+    first boot, userdata at full size); `boot_source=internal` on the ESP.
+  - **Update**: only disks with the stick's layout except userdata's size (flash-keep-data's
+    rule); shows old → new from `churro/build.txt` on both ESPs (written by the build: Google's
+    build from `tools/updater/buildinfo.sh` + Churro's build time; installs older than that file
+    show "unknown version"), refuses a Google build older than the installed one; rewrites
+    everything except Android's state and CHURRO-LOG (its GRUB copy refreshed), like
+    flash-keep-data. An install with the stick's GUIDs (old `churro.sh install`) gets its own.
+
+  SELinux: its own domain `churro_install`, entered only by init executing that file, and
+  **permissive** (it partitions whole disks, mounts ESPs, powers off; the rest of the system
+  stays enforcing): a first-version shortcut, see `patch-vendor.sh` for how to replace it with
+  allow rules. Self-check: `churro-install-test.sh` (loop devices, also under mksh). Limits:
+  512-byte-sector disks only, US keyboard layout (YES/ZES accepted), small console font on HiDPI
+  panels, no verification pass after the copy.
 * `display-density` (default) — the default screen density (`ro.sf.lcd_density`) computed from
   the PC's main screen instead of the image's fixed value (each Googlebook image sets it for its
   own panel; the Lenovo's: 240 for 2880x1800 15.3", ~222 dpi). With 240 a 1366x768 laptop got a
@@ -393,7 +426,9 @@ The recovery image already has the installed layout, so `churro.sh install <img>
 any Linux live) writes the image, moves the backup GPT to the disk end, grows userdata over the
 free space, gives the disk new GUIDs (`sgdisk -G`: Android finds its disk by the ESP's partition
 UUID, so a copy of the stick's would be ambiguous with the stick plugged in) and sets
-`boot_source=internal` on the ESP. TODO: an installer inside the booted image.
+`boot_source=internal` on the ESP.
+
+From the stick itself: feature `disk-install` (below), boot menu "Install to an internal disk".
 
 ## Updating the driver set and firmware (checklist, no prior context needed)
 

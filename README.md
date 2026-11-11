@@ -84,8 +84,13 @@ WSL, pass the stick through with [usbipd-win](https://github.com/dorssel/usbipd-
 `winget install usbipd` and, as admin, `usbipd bind --busid <id>` (`usbipd list` shows it); then
 per flash `usbipd attach --wsl --busid <id>` (the stick leaves Windows and shows up in `lsblk`)
 and `usbipd detach --busid <id>` afterwards.
-Install to a disk from any Linux live session: `sudo ./churro.sh install churro.img /dev/nvme0n1`
-(or `/dev/sda` for SATA / M.2 SATA, `/dev/mmcblk0` for eMMC). Supported controller modes: AHCI,
+Install to an internal disk **from the stick itself**: boot menu > "Install to an internal disk" >
+"Update an install" (rewrites the system, keeps Android's data and apps, shows the old and the
+new version) or "New install" (erases the disk you pick, whatever is on it; Android's data
+partition gets all the space left). It lists the disks it can use, never the stick, and asks for YES before writing.
+Needs a keyboard. Or from any Linux live session: `sudo ./churro.sh install churro.img /dev/nvme0n1`
+(or `/dev/sda` for SATA / M.2 SATA, `/dev/mmcblk0` for eMMC). Writing the image to a disk by
+other means leaves Android's data partition at the image's size. Supported controller modes: AHCI,
 IDE, Intel VMD/RST; RST "Optane/NVMe remapping" isn't (switch the BIOS to AHCI). Android only
 auto-mounts USB drives: internal and secondary disks stay untouched.
 
@@ -139,7 +144,7 @@ from source.
 | `churro.sh` | `auto` / `build` / `install` |
 | `versions.env` | every pinned version the build downloads (kernel driver config, firmware, Mesa, NDK, emulator image, BoringSSL, tools), one section each |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
-| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `display-density`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `libs-generic`, `setup-no-ota`, `debug-log` (all default), `security-trusty-vm` (experimental) |
+| `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `display-density`, `disk-install`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `libs-generic`, `setup-no-ota`, `debug-log` (all default), `security-trusty-vm` (experimental) |
 | `crypto/` | BoringSSL builds for Android (`build-boringssl.sh` platform copy, `build-boringssl-httpengine.sh` HttpEngine's) |
 | `kmod/` | Churro kernel build (`build-kernel.sh`, `profiles/`, `patches/` incl. the `vex-emulate` instruction emulator), out-of-tree pack builds |
 | `gfx/` | Mesa and minigbm (graphics allocator) builds for Android |

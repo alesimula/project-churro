@@ -208,6 +208,10 @@ EOF
   log "kernel cmdline: flash read-only, no TPM, no UEFI crash dumps, IOMMU passthrough, blacklisted: $blk"
 
   log "populating EFI-SYSTEM"
+  # churro/build.txt: Google's build + when Churro built this (disk-install: update old -> new)
+  { bash "$HERE/tools/updater/buildinfo.sh" "$in" || echo "churro: warning: no build info for $in" >&2
+    echo "CHURRO_BUILT=$(date -u +%Y-%m-%dT%H:%MZ)"; } > "$W/build.txt"
+  case ",$feats," in *,disk-install,*) export CHURRO_INSTALLER=1 ;; esac
   esp_build "$(part EFI-SYSTEM)" "$W" "$vcmd" "$bsrc" "${ln:+${LOOP}p$ln}"
   rm -rf "$W"
   log "done: $out"
@@ -262,10 +266,10 @@ cmd_auto() {
     [ "$p" != i915 ] || die "the i915 pack is retired (it broke xe on Gen12+): i915 now comes with drivers-extra and only loads on Intel GPUs xe doesn't drive"
     [ -d "$CHURRO_PACK_DIR/$p" ] || die "no module pack '$p' in $CHURRO_PACK_DIR"; margs+=(--modules "$CHURRO_PACK_DIR/$p"); done
   [ "$gfx" = auto ] || CHURRO_EXTRA_ARGS="androidboot.churro.gfx=$gfx ${CHURRO_EXTRA_ARGS:-}"
-  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density,debug-log$xfeat" "${margs[@]}"
+  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density,disk-install,debug-log$xfeat" "${margs[@]}"
 }
 
-case ${1:-} in auto|build|install) deps_ensure ;; esac
+case ${1:-} in auto|build) deps_ensure ;; esac   # install only needs the tools cmd_install checks
 case ${1:-} in
   auto) shift; [ $# -ge 2 ] || die "usage: churro.sh auto <in.bin> <out.img> [--gfx auto|native|nouveau|mesa|soft]"; cmd_auto "$@" ;;
   build) shift; [ $# -ge 2 ] || die "usage: churro.sh build <in.bin> <out.img> [opts]"; cmd_build "$@" ;;
