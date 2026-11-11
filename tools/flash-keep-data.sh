@@ -70,4 +70,7 @@ if [ -n "$esp" ] && [ -n "$lg" ]; then
   else echo "$note"; fi
   rmdir "$E" "$L"
 fi
+# the copy went through a loop mount of $DEV: its data sits in $DEV's cache until this, and the
+# .bat detaches the stick right after (seen: CHURRO-LOG's GRUB only written up to 1.4 MiB)
+sync
 echo "done: boot it; Android keeps its data and apps"
