@@ -39,7 +39,9 @@ Churro is tested on `ruby`; the other models are untested (docs/03, "Moving to a
 image or another Googlebook's image").
 
 The catalog lags behind: it still listed 271.R1 for ruby while Google was already offering the
-276.R4 update over the air. That's what `tools/updater` is for.
+276.R4 update over the air. That's what `tools/updater` is for. (2026-11-11: the catalog has
+276.R5 / 16693588 for ruby, lapis, mica and quartz, 276.R6 for moonstone; over the air ruby is
+already offered 286.R2 / 16833189.)
 
 ## Checking for and applying updates (`tools/updater/`)
 
@@ -65,33 +67,49 @@ product_a `/etc/build.prop`) and prints eval-safe `KEY=value` lines: `FINGERPRIN
 ### `ota-check.sh <recovery.bin | fingerprint> [--chain] [--html]`
 Asks Google's checkin server which update it offers that build, the same request GMS SystemUpdate
 makes (anonymous: random serial/IMEI/MAC, field set from tangalbert919/google-ota-prober). Prints
-`FROM` and `DELTA_PKG`, `DELTA_NFO` (target build fingerprint), `DELTA_PATCH` (security patch
-level), `DELTA_SIZE`; a summary goes to stderr. Exit 1 with "no delta offered" when there's no
-update for the build. `--chain` follows delta after delta (prints URLs), `--html` prints a table,
+`FROM` and `OTA_TYPE` (`delta` or `full`), `OTA_PKG`, `OTA_NFO` (target build fingerprint),
+`OTA_PATCH` (security patch level), `OTA_SIZE`; a summary goes to stderr. Exit 1 with "no update
+offered" when there's no update for the build. `--chain` follows update after update (prints
+URLs), `--html` prints a table,
 `--serve [port]` gives a small browser form on 127.0.0.1 (busybox httpd).
 - With a `.bin`, the build timestamp (`ro.build.date.utc`) is sent like the device does; with a bare
   fingerprint pass it as `OTA_TS=<timestamp>`. Without it the server may answer with an older
   full image instead of the delta.
-- Only deltas are reported. Google also has full packages, but it serves one to a device only after
-  that device's delta install failed (on Churro it always would: the partitions are modified). A
-  full isn't needed: the delta applied to the stock `.bin` gives the same partitions.
+- Google's server picks the package; a Googlebook (and these tools) take whatever the reply's
+  `update_url` points to. A **delta** (tens to hundreds of MB) applies only to the exact build it
+  was made from. A **full** (~3 GB) holds every partition whole and needs no source: it is what
+  checkin offers a build Google has no delta from.
+  (Google also sends a full to a device that reported a failed delta install; the tools never
+  report a failure, so they don't get one that way.)
 
-Example (2026-10-22): 271.R1 → `f0213a03968988d155c37c84c1cf99c1a750eb11.zip`, 36.5 MB, to
-`CL3B.260622.276.R4/16658739`, security patch 2026-10-01. Packages live at
+Examples. 2026-10-22: 271.R1 → `f0213a03968988d155c37c84c1cf99c1a750eb11.zip`, delta, 36.5 MB, to
+`CL3B.260622.276.R4/16658739`, security patch 2026-10-01. 2026-11-11: 276.R4 →
+`6a4a82fbe657a8396cbc14f90e62984ca9635900.zip`, **full**, 3.05 GB, to
+`CL3B.260622.286.R2/16833189`, security patch 2026-11-01 (no delta from 276.R4; on the same day
+271.R1 was offered a 164 MB delta to 286.R2). Packages live at
 `https://ota.googlezip.net/packages/ota-api/package/<sha1>.zip`, public, and the name is the
 file's own SHA-1.
 
 ### `ota-update.sh <recovery.bin> [out_dir | --bin <new.bin>]`
 Applies the update locally:
-1. `buildinfo.sh` + `ota-check.sh` → the delta for this build.
-2. Downloads it to `out/ota-cache/` (checked: SHA-1 = file name) and, once, AOSP's prebuilt
+1. `buildinfo.sh` + `ota-check.sh` → the package for this build (delta or full).
+2. Downloads it to `out/ota-cache/` (checked: SHA-1 = file name; a stopped download resumes on
+   the next run) and, once, AOSP's prebuilt
    `ota_extractor` (from `otatools.zip` on ci.android.com, Linux x86_64; only `bin/ota_extractor` +
    `lib64/` are kept, in `out/ota-cache/otatools/`, with the CI build in `BUILD`).
-3. For each partition in the delta, one at a time: cuts the source partition out of the `.bin`
-   (GPT `*_a` or a logical `*_a` inside `super`, no root), applies the delta with `ota_extractor`
-   (update_engine's own code, which handles the VABC `LZ4DIFF` operations generic payload tools
-   can't), writes the result, and checks it against the SHA-256 the payload declares for the new
-   partition.
+3. For each partition in the package, one at a time: for a delta, cuts the source partition out
+   of the `.bin` (GPT `*_a` or a logical `*_a` inside `super`, no root; a full has no source);
+   applies the package with `ota_extractor` (update_engine's own code, which handles the VABC
+   `LZ4DIFF` operations generic payload tools can't), writes the result, and checks it against
+   the SHA-256 the payload declares for the new partition.
+
+Partition sizes can change (286.R2: system, system_ext and product a little bigger, vendor 95 MB
+bigger, the two `*_dlkm` smaller). With `--bin`, a logical partition that outgrew its place in
+`super` grows where it is when the next partition is far enough (system, product, system_ext: the
+alignment gap was enough), otherwise it moves to the free space at the end of `super` (vendor) —
+`lib/lpinfo.py grow`, the same code `churro.sh` repacks with — and the copy gets the new `super`
+metadata. A smaller partition keeps its extent. A GPT partition (boot, vendor_boot, ...) can't
+grow: the script stops.
 
 Outputs:
 - `--bin <new.bin>`: a copy of the whole image with the partitions replaced at the same offsets,
@@ -101,9 +119,11 @@ Outputs:
 - `out_dir` (default `out/ota-update`): `<partition>.img` files + `BUILD_INFO` (FROM/TO/PACKAGE).
 
 Space: the new image (~19 GB, less where sparse) plus ~4 GB of temporary files (one partition's
-source + output; product is the largest). With `--bin` no `.img` files remain. Measured: 1 min
-35 s from an empty cache (36 MB delta + ~530 MB otatools downloads included), plus the time to copy
-19 GB.
+source + output; product is the largest), plus the package in the cache (3 GB for a full). With
+`--bin` no `.img` files remain. Measured, delta: 1 min 35 s from an empty cache (36 MB delta +
+~530 MB otatools downloads included), plus the time to copy 19 GB. Full (3.05 GB): 3 min 28 s on WSL with the package and otatools already in the cache and without
+the 19 GB copy (measured on a sparse skeleton of the image); from an empty cache add the two
+downloads (the package took ~2.5 min at ~20 MB/s).
 
 Env: `CHURRO_OTA_CACHE` (cache dir), `OTATOOLS_BUILD=<ci build id>` (pin otatools; default: the
 last good build of an x86_64 phone target on `aosp-android-latest-release`), `FINGERPRINT` +
@@ -111,11 +131,17 @@ last good build of an x86_64 phone target on `aosp-android-latest-release`), `FI
 
 Why it works: the recovery `.bin` is the stock build, byte-identical to what a Googlebook has
 before updating, so the delta applies cleanly (its source hashes are checked block by block). On a
-Churro install the same delta fails, because Churro has modified the partitions.
+Churro install the same delta fails, because Churro has modified the partitions. A full replaces
+the partitions whatever they held.
 
 Tested on ruby 271.R1 → 276.R4 (2026-10-22): all 11 partitions (boot, init_boot, vendor_boot,
 pvmfw, vbmeta, system, system_ext, product, vendor, system_dlkm, vendor_dlkm) match the target
-hashes.
+hashes. Full 276.R4 → 286.R2 (2026-11-11): all 11 match too, read back from a `--bin` image;
+system, product and system_ext grew in place, vendor moved to the end of `super`. That run used a
+sparse skeleton of the 276.R4 image (GPT + `super` metadata: a full needs no source data); the
+complete 19 GB run and `churro.sh` on the result are still to do. 286.R2's kernel is a new GKI
+commit (`6.18.21-android17-5-g0e2640c903c1-ab16560873`; 276.R4: `-g3938c8d97142-ab16302624`), so
+`churro.sh` rebuilds the kernel on it.
 
 ### `payload.py offset|parts|target <ota.zip> [partition]`
 Small dependency-free reader for the zip's `payload.bin` (update_metadata.proto): where the
@@ -123,13 +149,16 @@ payload starts in the zip, each partition's old/new size, and a partition's targ
 SHA-256.
 
 ### Limits
-- Only the partitions in the delta change, in slot A (a real Googlebook installs into slot B and
+- Only the partitions in the package change, in slot A (a real Googlebook installs into slot B and
   switches; Churro boots slot A and keeps its slot flags). `system_b` (preloaded apps and
   precompiled code for first boot), `ota_recovery_a/b` and the ChromeOS firmware/installer
   partitions stay at the old build; churro.sh doesn't use them, and outdated precompiled code is
   ignored and rebuilt by Android.
-- The image layout is kept. If a future update makes a partition bigger than its slot, the script
-  stops: that would need resizing `super` (`lib/lpinfo.py grow`), not implemented.
+- The GPT layout is kept: a boot-type partition bigger than its GPT partition stops the script.
+  Logical partitions grow inside `super` only (12 GiB, ~4.4 GiB free in Google's image; a moved
+  partition's old place stays empty, and `churro.sh` needs free space there for its own repacks).
+- A partition that got smaller leaves the old build's bytes after its end, inside its extent
+  (nothing reads them: the filesystem's own size counts, and Churro turns verification off).
 - One step per run. If Google offers a chain (271 → X → Y), run `ota-update.sh --bin` again on the
   new image.
 - `ota-update.sh` assumes one run at a time (it removes leftover `work.*` dirs in the cache).

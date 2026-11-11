@@ -60,9 +60,10 @@ erofs_repack() {
   local nsz; nsz=$(stat -c %s "$T/new.erofs")
   echo "   $name: $size -> $nsz bytes"
   if [ "$nsz" -gt "$size" ]; then
-    # move the partition to free space at the end of super (rewrites all LP metadata slots)
+    # grow it: in place if the next partition is far enough, else moved to the free space at the
+    # end of super (rewrites all LP metadata slots)
     read -r off size < <(python3 "$HERE/lib/lpinfo.py" "$super" grow "$name" "$nsz") || { rm -rf "$T"; return 1; }
-    echo "   $name relocated in super: offset $off, extent $size"
+    echo "   $name grown in super: offset $off, extent $size"
   fi
   dd if="$T/new.erofs" of="$super" bs=1M seek="$off" oflag=seek_bytes conv=notrunc,fsync status=none
   rm -rf "$T"

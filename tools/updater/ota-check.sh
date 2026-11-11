@@ -3,10 +3,10 @@
 # Usage: tools/updater/ota-check.sh <fingerprint | recovery.bin> [--chain] [--html]
 #          stdout: KEY=value lines, safe to eval (like buildinfo.sh); a human summary goes to stderr:
 #            FROM                    fingerprint that was checked
-#            DELTA_PKG               delta package URL (empty if the server offered none)
-#            DELTA_NFO               target build fingerprint
-#            DELTA_PATCH, DELTA_SIZE security patch level, size in bytes
-#          Only deltas are reported (apply one with tools/updater/ota-update.sh).
+#            OTA_TYPE                delta (small, from exactly this build) or full (whole partitions)
+#            OTA_PKG, OTA_NFO        package URL, target build fingerprint
+#            OTA_PATCH, OTA_SIZE     security patch level, size in bytes
+#          Apply it with tools/updater/ota-update.sh. A full is what the server offers a build it has no delta for.
 #          --chain  keep asking with each target build; stdout is then the URLs, one per line
 #          --html   print an HTML table instead
 #        tools/updater/ota-check.sh --serve [port]   browser UI on http://127.0.0.1:8080/ (busybox httpd)
@@ -16,7 +16,7 @@
 # META-INF/com/android/metadata (stored uncompressed near the start: first 16 KiB are enough).
 # The build timestamp (ro.build.date.utc, known for a recovery.bin) is sent like the device does;
 # without it the server may offer an older build, so offers not newer than the source are dropped.
-# Seen Oct 2026 (ruby): 271.R1 gets the 271.R1 -> 276.R4 delta.
+# Seen (ruby): Oct 2026, 271.R1 gets the 271.R1 -> 276.R4 delta; Nov 2026, 276.R4 gets a full 286.R2.
 # OTA_TS=<ro.build.date.utc> sets the build timestamp when checking a bare fingerprint.
 set -euo pipefail
 HERE=$(cd "$(dirname "$0")" && pwd)
@@ -63,7 +63,7 @@ setting() {
 # offers <fingerprint> <follow 0|1> [build timestamp]: one line per offered package
 # ("|"-separated: tab would merge empty fields in read):   type|target-build|security-patch|size-bytes|url
 offers() {
-  local fp=$1 follow=$2 src=${3:-0} url md to pre spl ts size
+  local fp=$1 follow=$2 src=${3:-0} url md to pre spl ts size type
   while :; do
     checkin "$fp" "$src" "$T/resp"
     url=$(setting "$T/resp" update_url); [ -n "$url" ] || break
@@ -72,8 +72,8 @@ offers() {
     to=$(sed -n 's/^post-build=//p' <<<"$md"); pre=$(sed -n 's/^pre-build=//p' <<<"$md")
     spl=$(sed -n 's/^post-security-patch-level=//p' <<<"$md"); ts=$(sed -n 's/^post-timestamp=//p' <<<"$md")
     newer "$to" "$fp" || break
-    [ -n "$pre" ] || break                                    # only deltas
-    printf 'delta|%s|%s|%s|%s\n' "$to" "$spl" "${size:-0}" "$url"
+    type=delta; [ -n "$pre" ] || type=full                    # no pre-build: whole partitions, any source build
+    printf '%s|%s|%s|%s|%s\n' "$type" "$to" "$spl" "${size:-0}" "$url"
     [ "$follow" = 1 ] || break
     fp=$to; src=${ts:-0}
   done
@@ -148,14 +148,14 @@ fi
 echo "from: $fp" >&2
 res=$(offers "$fp" "$follow" "$src")
 [ "$html" = 1 ] && { html_page "$fp" "$follow" "$res"; exit 0; }
-[ -n "$res" ] || { echo "no delta offered" >&2; exit 1; }
+[ -n "$res" ] || { echo "no update offered" >&2; exit 1; }
 declare -A out=()
 while IFS='|' read -r type to spl size url; do
   printf '%-5s -> %s  patch %s  %s MB\n' "$type" "$to" "$spl" $((size / 1000000)) >&2
   if [ "$follow" = 1 ]; then echo "$url"; continue; fi
-  [ -z "${out[PKG]:-}" ] || continue                         # first delta only
-  out[PKG]=$url out[NFO]=$to out[PATCH]=$spl out[SIZE]=$size
+  [ -z "${out[PKG]:-}" ] || continue                         # first offer only
+  out[TYPE]=$type out[PKG]=$url out[NFO]=$to out[PATCH]=$spl out[SIZE]=$size
 done <<<"$res"
 [ "$follow" = 1 ] && exit 0
 printf 'FROM=%q\n' "$fp"
-for f in PKG NFO PATCH SIZE; do printf 'DELTA_%s=%q\n' $f "${out[$f]:-}"; done
+for f in TYPE PKG NFO PATCH SIZE; do printf 'OTA_%s=%q\n' $f "${out[$f]:-}"; done

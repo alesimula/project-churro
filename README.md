@@ -35,8 +35,9 @@ sudo ./churro.sh auto android-desktop_signed_recovery_image-NEWNAME.bin churro.i
 ```
 
 `ota-check.sh` asks Google which update it offers that build (exit 1 if none); `ota-update.sh`
-downloads that update (a small delta) and applies it to a copy of the image with Google's own
-update code, checking every partition, without touching the original. Details and limits:
+downloads that update (a small delta, or the ~3 GB full package when Google has no delta from
+your build) and applies it to a copy of the image with Google's own update code, checking every
+partition, without touching the original. Details and limits:
 [docs/07-updates.md](docs/07-updates.md).
 
 ## Quick start

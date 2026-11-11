@@ -2,8 +2,9 @@
 """Minimal Android liblp (super partition) metadata tool.
   lpinfo.py <super>                     list "<name> <byte offset> <byte size>"
   lpinfo.py <super> <name>              print "<offset> <size>" of one (single-extent) partition
-  lpinfo.py <super> grow <name> <bytes> move/grow that partition into free space in super,
-                                        rewrite every metadata slot; prints "<offset> <size>"
+  lpinfo.py <super> grow <name> <bytes> grow that partition: in place if the next partition is
+                                        far enough, else moved to the free space at the end of
+                                        super; rewrites every metadata slot; prints "<offset> <size>"
 Formats: system/core/fs_mgr/liblp/include/liblp/metadata_format.h"""
 import hashlib, struct, sys
 
@@ -79,11 +80,14 @@ class Super:
             sys.exit(f"group limit {gmax} exceeded")
         bd = self.rows(3)[0]
         first, align, _, bdsize = struct.unpack_from("<QIIQ", self.tables, bd)
-        end_used = max((e[2] + e[0]) for n, es, gg in self.parts() for e in es if e[1] == 0)
-        al = max(align, 1 << 20) // 512
-        new_start = (max(end_used, first) + al - 1) // al * al
-        if (new_start + need) * 512 > bdsize:
-            sys.exit("not enough free space in super")
+        ext = [e for n, es, gg in self.parts() for e in es if e[1] == 0]
+        if start + need <= min([e[2] for e in ext if e[2] > start] + [bdsize // 512]):
+            new_start = start  # fits before the next partition (alignment gap): stays where it is
+        else:
+            al = max(align, 1 << 20) // 512
+            new_start = (max(max(e[2] + e[0] for e in ext), first) + al - 1) // al * al
+            if (new_start + need) * 512 > bdsize:
+                sys.exit("not enough free space in super")
         struct.pack_into("<QIQI", self.tables, row, need, 0, new_start, 0)
         self.write_all()
         return new_start * 512, need * 512
