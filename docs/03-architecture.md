@@ -25,7 +25,9 @@ Googlebooks boot via coreboot/depthcharge; a PC has UEFI. Churro builds one init
 boot-image-v4 bootloader would (vendor ramdisk → dlkm ramdisk → generic ramdisk → extras →
 bootconfig trailer) and boots the kernel's EFI stub through GRUB. GRUB passes the dynamic bits on
 the kernel cmdline: `androidboot.boot_part_uuid` (lets first-stage init find `super` on whatever
-disk we booted from) and `androidboot.boot_source=external|internal`.
+disk we booted from) and `androidboot.boot_source=external|internal`. GRUB finds its own disk's
+menu by the ESP UUID written into each disk's `BOOTX64.EFI` (`esp_set_id` in `lib/esp.sh`; old
+firmware leaves `$cmdpath` empty), else by `$cmdpath`, else the first disk with the menu.
 
 ### 2. Kernel: stock GKI or Churro kernel
 * **Stock GKI** (`boot_a`): fine for Intel Gen12+ (the image's own xe/iwlwifi/SOF modules) and for

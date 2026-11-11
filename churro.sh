@@ -72,7 +72,7 @@ cmd_build() {
     --kernel) kdir=$2; shift 2 ;;      # Churro kernel dir from kmod/build-kernel.sh (kernel, kernel.release)
     --vexemu) vexemu=$2; shift 2 ;;
     *) die "unknown option $1" ;; esac; done
-  need losetup sgdisk mkfs.vfat grub-mkstandalone cpio lz4 od
+  need losetup sgdisk mkfs.vfat grub-mkstandalone cpio lz4 od blkid
   [ "$(id -u)" = 0 ] || die "run as root"
 
   if [ "$(realpath "$in")" != "$(realpath -m "$out")" ]; then
@@ -224,7 +224,7 @@ EOF
 # Android formats userdata/metadata itself on first boot ("formattable").
 cmd_install() {
   local img=$1 dst=$2
-  need sgdisk dd partprobe
+  need sgdisk dd partprobe blkid
   [ "$(id -u)" = 0 ] || die "run as root"
   [ -b "$dst" ] || die "$dst is not a block device"
   [ "$(cat "/sys/block/$(basename "$dst")/removable" 2>/dev/null || echo 0)" = 0 ] || log "note: $dst is removable"
@@ -241,7 +241,10 @@ cmd_install() {
   local espn esp mnt; espn=$(sgdisk -p "$dst" | awk '$NF == "EFI-SYSTEM" {print $1}')
   case $dst in *[0-9]) esp=${dst}p$espn ;; *) esp=$dst$espn ;; esac   # nvme0n1p12 vs sda12
   mnt=$(mktemp -d); mount "$esp" "$mnt"
-  sed -i 's/^set boot_source=.*/set boot_source=internal/' "$mnt/churro/env.cfg"; umount "$mnt"; rmdir "$mnt"
+  sed -i 's/^set boot_source=.*/set boot_source=internal/' "$mnt/churro/env.cfg"
+  # shortcut: CHURRO-LOG's GRUB copy keeps the image's ID (its fallback search still finds this disk's ESP)
+  esp_set_id "$mnt" "$(blkid -p -o value -s PART_ENTRY_UUID "$esp")" || log "note: older image, GRUB may boot another Churro disk plugged in"
+  umount "$mnt"; rmdir "$mnt"
   log "done. Reboot, pick the disk in the UEFI boot menu (Secure Boot off)."
 }
 

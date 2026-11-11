@@ -164,13 +164,17 @@ sync
 
 run "can't open the EFI partition of the target" mount -t vfat "$(part $t $espn)" $T/mnt
 run "can't set the boot source" sed -i 's/^set boot_source=.*/set boot_source=internal/' $T/mnt/churro/env.cfg
-if [ "$mode" = update ]; then
-  # CHURRO-LOG keeps its logs but gets the new GRUB (lib/esp.sh: firmware menus list it); best effort
-  [ -n "$logn" ] && mount -t vfat "$(part $t $logn)" $T/log 2>/dev/null &&
-    { mkdir -p $T/log/EFI/BOOT && cp $T/mnt/EFI/BOOT/BOOTX64.EFI $T/log/EFI/BOOT/; umount $T/log; }
-  # an install copied 1:1 from a stick (old churro.sh install) has the stick's IDs: give it its own
-  [ "$(guid $t)" != "$(guid $src)" ] || sgdisk --randomize-guids "$(node $t)" > /dev/null 2>&1
-fi
+# an install copied 1:1 from a stick (old churro.sh install) has the stick's IDs: give it its own
+[ "$mode" = new ] || [ "$(guid $t)" != "$(guid $src)" ] || sgdisk --randomize-guids "$(node $t)" > /dev/null 2>&1
+# this disk's ESP UUID into its GRUB (lib/esp.sh esp_set_id): old firmware gives GRUB no $cmdpath
+espid=$(sgdisk --info=$espn "$(node $t)" 2>/dev/null | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f)
+off=$(cat $T/mnt/churro/espid.off 2>/dev/null)
+if [ -n "$off" ] && [ ${#espid} = 36 ]; then
+  printf %s "$espid" | run "can't write the disk's ID into GRUB" dd of=$T/mnt/EFI/BOOT/BOOTX64.EFI bs=1 seek=$off conv=notrunc
+else say "note: older stick, GRUB may boot another Churro disk plugged in"; fi
+# CHURRO-LOG (logs kept on update) gets this GRUB (lib/esp.sh: firmware menus list it); best effort
+[ -n "$logn" ] && mount -t vfat "$(part $t $logn)" $T/log 2>/dev/null &&
+  { mkdir -p $T/log/EFI/BOOT && cp $T/mnt/EFI/BOOT/BOOTX64.EFI $T/log/EFI/BOOT/; umount $T/log; }
 umount $T/mnt
 finish "Done. After the power off, unplug the disk Churro was running from (the stick) and start
 the PC: if it doesn't start Churro by itself, pick the internal disk in the firmware's boot

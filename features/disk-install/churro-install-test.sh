@@ -9,7 +9,8 @@ mkdir bin m; printf '#!/bin/sh\necho POWEROFF\nexit 1\n' > bin/reboot; chmod +x 
 loop() { R=$(losetup -fP --show "$1"); L+=("$R"); R=${R#/dev/}; }   # -> $R
 fill() { { yes "$1" || true; } | dd of="$2" bs=1M iflag=fullblock count="$3" status=none; }   # <text> <device> <MiB>
 esp() { mkfs.vfat "$1" >/dev/null; mount "$1" m; mkdir -p m/churro m/EFI/BOOT
-  printf 'set boot_source=external\nset extra_args=""\n' > m/churro/env.cfg; echo "$2" > m/EFI/BOOT/BOOTX64.EFI
+  printf 'set boot_source=external\nset extra_args=""\n' > m/churro/env.cfg; printf '%s CHURRO-ESPID:%036d end' "$2" 0 > m/EFI/BOOT/BOOTX64.EFI
+  echo $(( ${#2} + 14 )) > m/churro/espid.off
   printf 'BUILD_ID=B%s\nINCREMENTAL=%s\nCHURRO_BUILT=2026-11-10\n' "$3" "$3" > m/churro/build.txt; umount m; }
 # run <mode> <candidate disks> <typed lines...>: output in out.txt, exit status returned
 run() { local mode=$1 disks=$2; shift 2
@@ -47,10 +48,13 @@ sgdisk -v $d | grep -q "No problems found" || fail "target GPT has problems"
 [ "$(sgdisk -i 12 $d | grep unique)" != "$(sgdisk -i 12 $s | grep unique)" ] || fail "same ESP GUID"
 sgdisk -i 15 $d | grep -q "Attribute flags: 0101000000000000" || fail "vbmeta_a slot flags lost"
 [ $(( $(blockdev --getsz ${d}p1) )) -gt 200000 ] || fail "userdata not grown to the disk"
-cmp -s ${s}p3 ${d}p3 && cmp -s ${s}p6 ${d}p6 && cmp -s ${s}p2 ${d}p2 || fail "partitions not copied"
+cmp -s ${s}p3 ${d}p3 && cmp -s ${s}p6 ${d}p6 || fail "partitions not copied"   # p2 (CHURRO-LOG): own GRUB
 for p in 17 24 29 31; do cmp -s -n $(( $(blockdev --getsize64 ${d}p$p) )) ${d}p$p /dev/zero || fail "p$p not cleared"; done
 cmp -s -n $((16 << 20)) ${d}p1 /dev/zero || fail "userdata not cleared"
 mount -o ro ${d}p12 m; grep -q "boot_source=internal" m/churro/env.cfg && grep -q GRUB1 m/EFI/BOOT/BOOTX64.EFI || fail "ESP"; umount m
+id() { blkid -p -o value -s PART_ENTRY_UUID ${d}p12; }   # GRUB knows its disk (lib/esp.sh esp_set_id)
+mount -o ro ${d}p12 m; grep -q "GRUB1 CHURRO-ESPID:$(id) end" m/EFI/BOOT/BOOTX64.EFI || fail "ESP ID in GRUB"; umount m
+mount -o ro ${d}p2 m; grep -q "CHURRO-ESPID:$(id) end" m/EFI/BOOT/BOOTX64.EFI || fail "ESP ID in CHURRO-LOG's GRUB"; umount m
 ok "new install: table, new GUIDs, copy, cleared state, boot_source=internal"
 
 # update: a newer stick; Android's state and the logs on the target stay
@@ -65,7 +69,7 @@ cmp -s ${s}p3 ${d}p3 || fail "super not updated"
 cmp -s -n $((1 << 20)) ${d}p24 /dev/zero || fail "misc not cleared"
 [ "$(sgdisk -p $d | grep identifier)" = "$tguid" ] || fail "GUIDs changed by an update"
 mount ${d}p12 m; grep -q "boot_source=internal" m/churro/env.cfg && grep -q GRUB2 m/EFI/BOOT/BOOTX64.EFI || fail "ESP after update"; umount m
-mount ${d}p2 m; grep -q mylog m/boot.log && grep -q GRUB2 m/EFI/BOOT/BOOTX64.EFI || fail "CHURRO-LOG: logs kept + new GRUB"; umount m
+mount ${d}p2 m; grep -q mylog m/boot.log && grep -q "GRUB2 CHURRO-ESPID:$(id) end" m/EFI/BOOT/BOOTX64.EFI || fail "CHURRO-LOG: logs kept + new GRUB"; umount m
 ok "update: system rewritten, data/keys/logs kept, versions shown"
 
 esp ${s}p12 GRUB0 50; usum=$(sum ${d}p3)   # an older stick

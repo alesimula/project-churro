@@ -2,6 +2,14 @@
 # Populate the image's (empty) EFI-SYSTEM partition with GRUB + kernel + initrd.
 # Googlebooks boot through depthcharge, which never touches the ESP, so we own it.
 
+# esp_set_id <mounted ESP> <its partition UUID>: into GRUB's CHURRO-ESPID (the stub below). Every
+# writer of a disk's ESP or partition table calls it (churro-install does the same with dd).
+esp_set_id() {
+  local off; off=$(cat "$1/churro/espid.off" 2>/dev/null)
+  [ -n "$off" ] && [ ${#2} = 36 ] || { echo "churro: can't write the ESP UUID into GRUB ($1, '$2')" >&2; return 1; }
+  printf %s "$2" | dd of="$1/EFI/BOOT/BOOTX64.EFI" bs=1 seek="$off" conv=notrunc status=none
+}
+
 # esp_build <esp block device> <stage dir with kernel, initrd.img> <vendor cmdline> <boot_source>
 #   [log partition]: also gets GRUB (firmware boot menus list every FAT partition of a USB disk,
 #   CHURRO-LOG = partition 2 before the ESP's 12: without it, that entry boots nothing)
@@ -14,20 +22,39 @@ esp_build() {
   # Tiny embedded config: find the partition GRUB was loaded from, hand over to the editable cfg.
   local stub; stub=$(mktemp)
   cat > "$stub" <<'EOF'
-regexp --set=1:root '^\(([^)]+)\)' "$cmdpath"
+# CHURRO-ESPID: this disk's ESP UUID, written into this binary by esp_set_id (churro.sh,
+# churro-install). Old firmware (ASUS Aptio 2015) gives GRUB no $cmdpath, and every Churro disk has
+# the same files: a file search alone can pick another plugged-in Churro disk.
+set espid="CHURRO-ESPID:00000000-0000-0000-0000-000000000000"
+regexp --set=1:espid '^CHURRO-ESPID:(.*)$' "$espid"
+# 1. the ESP with that UUID: the binary always knows its disk, $cmdpath can be empty or wrong
+set root=
+set found=id
+for p in (*,gpt*); do
+  set u=; probe --set=u --part-uuid "$p"
+  if [ "$u" = "$espid" ]; then regexp --set=1:root '^\(?([^()]+)\)?$' "$p"; break; fi
+done
+# 2. as before the ID: the partition GRUB was started from, else the first disk with the menu
 if [ -z "$root" -o ! -f "($root)/churro/grub.cfg" ]; then
-  # started from CHURRO-LOG: the ESP of the same disk first (not another Churro disk's)
-  regexp --set=1:disk '^([^,]+)' "$root"
-  if [ -n "$disk" ]; then search --no-floppy --file --set=root --hint="$disk," /churro/grub.cfg
-  else search --no-floppy --file --set=root /churro/grub.cfg; fi
+  set found=cmdpath
+  regexp --set=1:root '^\(([^)]+)\)' "$cmdpath"
+  if [ -z "$root" -o ! -f "($root)/churro/grub.cfg" ]; then
+    set found=search
+    search --no-floppy --file --set=root /churro/grub.cfg
+  fi
 fi
-echo "Churro: cmdpath=$cmdpath root=$root"
+# for the GRUB console (c in the menu): echo $found $espid $root $cmdpath
+export found espid
+echo "Churro: found=$found cmdpath=$cmdpath espid=$espid root=$root"
 configfile "($root)/churro/grub.cfg"
 EOF
   grub-mkstandalone -O x86_64-efi -o "$mnt/EFI/BOOT/BOOTX64.EFI" \
     --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop efi_uga probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
     --locales="" --fonts="" "boot/grub/grub.cfg=$stub"
   rm -f "$stub"
+  # where CHURRO-ESPID's UUID sits in the binary (churro-install: toybox grep has no byte offsets)
+  grep -obaF 'espid="CHURRO-ESPID:' "$mnt/EFI/BOOT/BOOTX64.EFI" | awk -F: 'NR == 1 {print $1 + 20}' > "$mnt/churro/espid.off"
+  esp_set_id "$mnt" "$(blkid -p -o value -s PART_ENTRY_UUID "$dev")"
   if [ -n "$logp" ]; then
     local lm; lm=$(mktemp -d); mount "$logp" "$lm"
     mkdir -p "$lm/EFI/BOOT"; cp "$mnt/EFI/BOOT/BOOTX64.EFI" "$lm/EFI/BOOT/"; umount "$lm"; rmdir "$lm"
