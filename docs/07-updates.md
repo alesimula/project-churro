@@ -90,7 +90,7 @@ Examples. 2026-10-22: 271.R1 → `f0213a03968988d155c37c84c1cf99c1a750eb11.zip`,
 `https://ota.googlezip.net/packages/ota-api/package/<sha1>.zip`, public, and the name is the
 file's own SHA-1.
 
-### `ota-update.sh <recovery.bin> [out_dir | --bin <new.bin>]`
+### `ota-update.sh <recovery.bin> [out_dir | --bin <new.bin> | --in-place [--undoable] | --revert]`
 Applies the update locally:
 1. `buildinfo.sh` + `ota-check.sh` → the package for this build (delta or full).
 2. Downloads it to `out/ota-cache/` (checked: SHA-1 = file name; a stopped download resumes on
@@ -117,6 +117,27 @@ Outputs:
   file, builds `<new.bin>.part` and renames it only when every partition matched (removed on
   failure). The copy uses `cp --reflink=auto --sparse=always`.
 - `out_dir` (default `out/ota-update`): `<partition>.img` files + `BUILD_INFO` (FROM/TO/PACKAGE).
+- `--in-place`: updates the image file itself, with no 19 GB copy and nothing kept. Each partition
+  is still checked by reading it back, but a run that fails or is stopped (Ctrl+C, a hash
+  mismatch, a full disk, a power cut) leaves the image half updated, a mix of two builds. With a
+  full package, run it again to finish: a full applies to anything, and the script prints the
+  command (the half-updated image no longer tells which build it was, so `FINGERPRINT` and
+  `DATE_UTC` are passed in). With a delta there is no way forward: the partitions already replaced
+  no longer match what the delta expects, so keep a copy of the image, or use `--undoable`.
+- `--in-place --undoable`: the same, but before a partition is replaced its whole old content is
+  saved in `<recovery.bin>.undo/` and flushed to disk, and so is the head of `super`. That is
+  every partition in the package, ~4 GB for 286.R2 (instead of the 19 GB of `--bin`), read and
+  written once more. If the run fails or is stopped it puts the image back by itself; after a kill
+  or a power cut the folder is left unfinished, the next `--in-place` refuses, and `--revert` puts
+  the image back.
+- `--revert`: writes the saved content back and removes the folder: the image is byte for byte what
+  it was before the last `--in-place --undoable` (delta or full: it restores bytes, it doesn't
+  apply anything). The folder is kept after a good update for this, until the next `--in-place`
+  removes it; deleting it only gives up the way back. It belongs to that image file: delete it if
+  you replace the file with another one.
+  Measured with `--undoable` on the 276.R4 image, full to 286.R2, image and cache on the Windows
+  drive under WSL (package and otatools already downloaded): update 4 min 13 s, undo folder
+  3.8 GB, revert 36 s. Without `--undoable` the 3.8 GB save is skipped (not timed on the real image).
 
 Space: the new image (~19 GB, less where sparse) plus ~4 GB of temporary files (one partition's
 source + output; product is the largest), plus the package in the cache (3 GB for a full). With
@@ -162,6 +183,10 @@ SHA-256.
 - One step per run. If Google offers a chain (271 → X → Y), run `ota-update.sh --bin` again on the
   new image.
 - `ota-update.sh` assumes one run at a time (it removes leftover `work.*` dirs in the cache).
+- `--in-place` without `--undoable` has no safety net (above). With it, it is as safe as the undo
+  folder: with the folder deleted, or on a disk that loses flushed data in a power cut, a broken
+  run leaves a mixed image. `--revert` doesn't check that the image is still the one the folder
+  was made from.
 
 ## Why Google's on-device OTA doesn't work on Churro
 
