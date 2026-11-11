@@ -396,7 +396,7 @@ files get a sibling's label or an explicit one.
 * `debug-log` (default) — boot log to a file you can read from Windows. The "debug" GRUB entries
   start `/churro/logger` (static, `features/debug-log/logger.c`) as `rdinit`: it forks a child
   (own mount namespace, invisible to first-stage init) that copies `/dev/kmsg` — kernel + Android
-  init messages — into `boot.log` on the **CHURRO-LOG** partition (the unused KERN-A slot turned
+  init messages — into `boot.log` on the **CHURRO-LOG** partition of the disk GRUB booted from: the one whose GPT holds the partition ID GRUB passes as `androidboot.boot_part_uuid` (its EFI partition, read at every boot), so a second disk with a Churro on it (an install, a stick) never gets this boot's log; any CHURRO-LOG if that disk hasn't shown up after 10 s (self-check: `features/debug-log/logger-test.sh`) (the unused KERN-A slot turned
   into a FAT32 basic-data partition; the ESP is hidden by Windows), which also holds a copy of GRUB (`EFI/BOOT/BOOTX64.EFI`: firmware boot menus list every FAT partition of a USB disk, CHURRO-LOG = partition 2 before the ESP's 12; its stub finds `/churro/grub.cfg` on the ESP of the same disk; `flash-keep-data` refreshes the copy while keeping the logs), fsync'ed per batch so a hang
   + power button keeps it; then execs the real `/init`. `boot.log`/`boot.prev.log` are created
   by the build at 64 MiB, filled with blank lines, and only overwritten in place (text ends at the

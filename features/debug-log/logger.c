@@ -33,14 +33,15 @@
 
 static char io[65536];
 
-// Find the CHURRO-LOG partition in sysfs ("sys" is mounted in cwd); fills major/minor.
-static int find_part(unsigned *maj, unsigned *min) {
-  DIR *d = opendir("sys/class/block");
+// Find a CHURRO-LOG partition among the entries of a sysfs dir ("sys" is mounted in cwd):
+// sys/class/block (any disk) or sys/class/block/<disk> (that disk's partitions); fills major/minor.
+static int find_part(const char *dir, unsigned *maj, unsigned *min) {
+  DIR *d = opendir(dir);
   struct dirent *e;
   int found = 0;
   while (d && !found && (e = readdir(d))) {
     char p[512], buf[1024];
-    snprintf(p, sizeof p, "sys/class/block/%s/uevent", e->d_name);
+    snprintf(p, sizeof p, "%s/%s/uevent", dir, e->d_name);
     FILE *f = fopen(p, "r");
     if (!f) continue;
     size_t n = fread(buf, 1, sizeof buf - 1, f);
@@ -55,6 +56,71 @@ static int find_part(unsigned *maj, unsigned *min) {
   }
   if (d) closedir(d);
   return found;
+}
+
+static int read_str(const char *path, char *buf, size_t n) {  // first line, 0 = read
+  FILE *f = fopen(path, "r");
+  if (!f) return -1;
+  int ok = fgets(buf, n, f) != NULL;
+  fclose(f);
+  if (ok) buf[strcspn(buf, "\n")] = 0;
+  return ok ? 0 : -1;
+}
+
+// 1 if whole disk <name>'s GPT has a partition with unique GUID <uuid> (text, any case)
+static int disk_has(const char *name, const char *uuid) {
+  char p[300], v[64];
+  unsigned ma, mi, lbs = 512;
+  snprintf(p, sizeof p, "sys/class/block/%s/partition", name);
+  if (!access(p, F_OK)) return 0;  // a partition, not a disk
+  snprintf(p, sizeof p, "sys/class/block/%s/dev", name);
+  if (read_str(p, v, sizeof v) || sscanf(v, "%u:%u", &ma, &mi) != 2) return 0;
+  snprintf(p, sizeof p, "sys/class/block/%s/queue/logical_block_size", name);
+  if (!read_str(p, v, sizeof v)) lbs = strtoul(v, NULL, 10);
+  unlink("disk");
+  if (mknod("disk", S_IFBLK | 0600, makedev(ma, mi))) return 0;
+  int fd = open("disk", O_RDONLY | O_CLOEXEC), found = 0;
+  unsigned char h[92], e[128];
+  if (fd >= 0 && pread(fd, h, sizeof h, lbs) == sizeof h && !memcmp(h, "EFI PART", 8)) {
+    uint64_t lba; uint32_t num, esz;
+    memcpy(&lba, h + 72, 8); memcpy(&num, h + 80, 4); memcpy(&esz, h + 84, 4);
+    for (uint32_t i = 0; i < num && i < 256 && esz >= 128 && !found; i++) {
+      if (pread(fd, e, sizeof e, lba * lbs + (uint64_t)i * esz) != sizeof e) break;
+      const unsigned char *g = e + 16;  // unique partition GUID, mixed-endian
+      char t[40];
+      snprintf(t, sizeof t, "%02x%02x%02x%02x-%02x%02x-%02x%02x-%02x%02x-%02x%02x%02x%02x%02x%02x",
+               g[3], g[2], g[1], g[0], g[5], g[4], g[7], g[6], g[8], g[9], g[10], g[11], g[12], g[13], g[14], g[15]);
+      found = !strcasecmp(t, uuid);
+    }
+  }
+  if (fd >= 0) close(fd);
+  unlink("disk");
+  return found;
+}
+
+// The CHURRO-LOG to log to: the one on the disk GRUB booted from (androidboot.boot_part_uuid =
+// the ID of its EFI partition, read fresh at every boot), so a second disk with a Churro on it
+// (an install, a stick) never gets this boot's log. Without that ID, or if its disk hasn't shown
+// up after <wait> polls, any CHURRO-LOG. 1 = found.
+static int pick(unsigned *maj, unsigned *min, int poll, int wait) {
+  static char cmd[4096];
+  char uuid[64] = "", *u;
+  if (!cmd[0]) read_str("proc/cmdline", cmd, sizeof cmd);
+  if ((u = strstr(cmd, "androidboot.boot_part_uuid="))) sscanf(u + 27, "%63[0-9A-Fa-f-]", uuid);
+  if (uuid[0]) {
+    DIR *d = opendir("sys/class/block");
+    struct dirent *e;
+    int ok = 0;
+    while (d && !ok && (e = readdir(d))) {
+      if (e->d_name[0] == '.' || !disk_has(e->d_name, uuid)) continue;
+      char dir[300];
+      snprintf(dir, sizeof dir, "sys/class/block/%s", e->d_name);
+      ok = find_part(dir, maj, min);
+    }
+    if (d) closedir(d);
+    if (ok) return 1;
+  }
+  return (!uuid[0] || poll >= wait) && find_part("sys/class/block", maj, min);
 }
 
 // Report a failed step in the kernel log itself (visible on screen / serial / boot.log).
@@ -349,8 +415,9 @@ static void logger(void) {
 
   // Poll fast: the disk usually appears just before Android loads its SELinux policy, and
   // mounting is easier (fewer rules) while that hasn't happened yet.
+  // The boot disk's CHURRO-LOG (pick); any after 10 s if that disk never shows up.
   unsigned maj = 0, min = 0;
-  for (int i = 0; !find_part(&maj, &min); i++) {
+  for (int i = 0; !pick(&maj, &min, i, 100); i++) {
     if (i >= 3000) { errno = ENODEV; fail("finding partition " PARTNAME " (5 min)"); return; }
     usleep(100000);
   }
