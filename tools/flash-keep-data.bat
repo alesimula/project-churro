@@ -21,7 +21,8 @@ $attached = $false; $busid = $null; $rc = 1
 try {
 $repo = (Resolve-Path (Join-Path $env:FKD_DIR '..')).Path
 $distro = 'Ubuntu'; if ($env:CHURRO_WSL) { $distro = $env:CHURRO_WSL }
-if ($env:FKD_IMG) { $img = (Resolve-Path $env:FKD_IMG).Path } else {
+$grow = $env:FKD_ACTION -eq 'grow'   # tools\grow-data.bat: same disk picking, then grow-data.sh
+if ($grow) { $img = $null } elseif ($env:FKD_IMG) { $img = (Resolve-Path $env:FKD_IMG).Path } else {
   # pick an image in out\ (churro.sh writes a .img, a compressed copy is .img.gz), newest first
   $imgs = @(Get-ChildItem (Join-Path $repo 'out') -File | Where-Object { $_.Name -match '\.img(\.gz)?$' } | Sort-Object LastWriteTime -Descending)
   if ($imgs.Count -eq 0) { Fail "no .img / .img.gz in $repo\out (or pass an image: flash-keep-data.bat <image>)" }
@@ -33,7 +34,7 @@ if ($env:FKD_IMG) { $img = (Resolve-Path $env:FKD_IMG).Path } else {
   $i = 0; if (-not [int]::TryParse($p.Trim(), [ref]$i) -or $i -lt 1 -or $i -gt $imgs.Count) { Fail "no image number $p" }
   $img = $imgs[$i - 1].FullName
 }
-if (-not (Test-Path $img)) { Fail "image not found: $img" }
+if (-not $grow -and -not (Test-Path $img)) { Fail "image not found: $img" }
 
 # 1. usbipd-win (a terminal opened before installing it doesn't have it on PATH yet)
 if (-not (Get-Command usbipd -ErrorAction SilentlyContinue)) { $env:Path += ';C:\Program Files\usbipd-win' }
@@ -64,7 +65,7 @@ $rows = foreach ($d in $disks) {
 }
 Write-Host "`nUSB disks (system/boot disks are never listed):"
 $rows | Format-Table N, Disk, Name, SizeGB, Partitions -AutoSize | Out-Host
-$pick = Read-Host 'Number of the Churro stick to update (Enter = cancel)'
+$pick = Read-Host 'Number of the Churro stick (Enter = cancel)'
 if (-not $pick) { Fail 'cancelled' }
 $row = $rows | Where-Object { "$($_.N)" -eq $pick.Trim() }
 if (-not $row) { Fail "no disk number $pick" }
@@ -106,6 +107,23 @@ $before = WslUsbDisks
   $info = wsl.exe -d $distro -u root -- bash "$wrepo/tools/updater/buildinfo.sh" $sdev
   if ($LASTEXITCODE -ne 0 -or -not ($info -match '^FINGERPRINT=')) { Fail "$sdev doesn't hold Googlebook OS (buildinfo.sh found no build): not touching it" }
   Write-Host "`nOn the stick now:"; $info | Where-Object { $_ -match '^(MODEL|RELEASE|BUILD_ID|INCREMENTAL|FINGERPRINT)=' } | ForEach-Object { "  $_" } | Out-Host
+  if ($grow) {
+    # 5. grow userdata: grow-data.sh's plan first (DRY=1), then the real run
+    $plan = wsl.exe -d $distro -u root -- env DRY=1 bash "$wrepo/tools/grow-data.sh" $sdev
+    if ($LASTEXITCODE -ne 0) { Fail 'grow-data.sh failed (see above)' }
+    Write-Host ''; $plan | Out-Host
+    $gargs = @('--yes')
+    if ($plan -match 'already started') {
+      $ok = Read-Host "`nType ERASE to grow the partition and ERASE Android's data (it then sets itself up again with all the space)"
+      if ($ok -cne 'ERASE') { Fail 'cancelled' }
+      $gargs += '--erase'
+    } elseif (-not ($plan -match 'nothing to do')) {
+      $ok = Read-Host "`nGrow Android's data partition on this stick? Type YES"
+      if ($ok -cne 'YES') { Fail 'cancelled' }
+    }
+    wsl.exe -d $distro -u root -- bash "$wrepo/tools/grow-data.sh" $sdev @gargs
+    if ($LASTEXITCODE -ne 0) { Fail 'grow-data.sh failed (see above)' }
+  } else {
   Write-Host "Image: $img"
   $ok = Read-Host "`nUpdate the stick from this image, keeping userdata? Type YES"
   if ($ok -cne 'YES') { Fail 'cancelled' }
@@ -113,6 +131,7 @@ $before = WslUsbDisks
   # 5. write (flash-keep-data.sh re-checks the partition layout and refuses on any mismatch)
   wsl.exe -d $distro -u root -- bash "$wrepo/tools/flash-keep-data.sh" (ToWsl $img) $sdev --yes
   if ($LASTEXITCODE -ne 0) { Fail 'flash-keep-data.sh failed (see above)' }
+  }
   Write-Host 'Done.' -ForegroundColor Green; $rc = 0
 } catch {
   Write-Host "ERROR: $_" -ForegroundColor Red

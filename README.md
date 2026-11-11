@@ -84,6 +84,13 @@ WSL, pass the stick through with [usbipd-win](https://github.com/dorssel/usbipd-
 `winget install usbipd` and, as admin, `usbipd bind --busid <id>` (`usbipd list` shows it); then
 per flash `usbipd attach --wsl --busid <id>` (the stick leaves Windows and shows up in `lsblk`)
 and `usbipd detach --busid <id>` afterwards.
+A stick bigger than the image keeps Android's data partition at the image's size (12 GiB by
+default) when written with Etcher/Rufus/dd: `tools\grow-data.bat` (Windows; same disk picking and
+checks as flash-keep-data.bat) or `sudo tools/grow-data.sh /dev/sdX` grows it to the end of the
+stick. Do it **before the first start**: Android formats the partition then, at the size it has,
+and that encrypted filesystem can't be grown safely from outside. On a stick that was already
+started the tool only offers ERASE (`--erase`): it grows the partition and clears Android's
+data, which then sets itself up again with all the space.
 Install to an internal disk **from the stick itself**: boot menu > "Install to an internal disk" >
 "Update an install" (rewrites the system, keeps Android's data and apps, shows the old and the
 new version) or "New install" (erases the disk you pick, whatever is on it; Android's data
