@@ -8,9 +8,10 @@
 # full one (~3 GB into userdata/super) for a slot our GRUB never boots. Its rc goes, so every
 # install attempt fails before downloading.
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 for s in timberslide update_engine; do
   R=$1/system/etc/init/$s.rc
-  [ -f "$R" ] || { echo "   system: no $s.rc (nothing to do)"; continue; }
+  [ -f "$R" ] || { note "firmware-lockdown: no /system/etc/init/$s.rc ($s started from another file?)"; continue; }
   rm -f "$R"
   echo "   system: $s disabled"
 done

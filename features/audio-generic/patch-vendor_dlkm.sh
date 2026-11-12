@@ -7,8 +7,10 @@
 # Both lines go; the kernel then auto-detects like a distro (the vendor cmdline's audio
 # overrides are stripped in churro.sh). Rewritten in place: keeps the files' SELinux labels.
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 D=$1/lib/modules
-edit() { local c; c=$(grep -vE "$1" "$2" || true); printf '%s\n' "$c" > "$2"; }
+edit() { local c; grep -qE "$1" "$2" || note "audio-generic: no line matching '$1' in vendor_dlkm ${2##*/}"
+         c=$(grep -vE "$1" "$2" || true); printf '%s\n' "$c" > "$2"; }
 edit '^blocklist snd_hda_intel$' "$D/modules.blocklist"
 edit '^options snd_sof_intel_hda_generic .*(hda_model|dmic_num)=' "$D/modules.options"
 # Codec drivers must be loaded before the controller probes: it binds a driver to each codec

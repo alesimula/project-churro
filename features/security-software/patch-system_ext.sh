@@ -2,12 +2,14 @@
 # Remove the Trusty-VM-backed HAL declarations from the system_ext VINTF manifest so keystore2
 # falls back to its software KeyMint. Usage: patch-system_ext.sh <extracted system_ext tree>
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 # The Trusty security VM launchers: no Trusty VM image here, so the protected one crash-loops
 # (SIGABRT on the missing desktop.security_vm.vm_image property) whenever a client asks for one
 # of its interfaces, all session long.
-rm -f "$1/etc/init/desktop-trusty_security_vm_launcher.rc"
+L=$1/etc/init/desktop-trusty_security_vm_launcher.rc
+[ -e "$L" ] || note "security-software: no /system_ext/etc/init/${L##*/} (Trusty VM launcher renamed?)"; rm -f "$L"
 M=$1/etc/vintf/manifest.xml
-[ -f "$M" ] || exit 0
+[ -f "$M" ] || { note "security-software: no /system_ext/etc/vintf/manifest.xml (Trusty KeyMint declared elsewhere?)"; exit 0; }
 # drop every <hal>...</hal> block that names one of these interfaces
 awk '
   /<hal[ >]/ { buf = $0 "\n"; inhal = 1; next }
@@ -16,5 +18,6 @@ awk '
             if (buf !~ /security\.keymint|security\.secureclock|security\.sharedsecret|finger_guard|KeyMintProvisioningService/) printf "%s", buf }
           next }
   { print }' "$M" > "$M.new"
+cmp -s "$M" "$M.new" && note "security-software: no Trusty KeyMint HAL entries in system_ext's VINTF manifest (moved?)"
 cat "$M.new" > "$M"; rm -f "$M.new"   # rewrite in place: keeps the file's SELinux label (xattr)
 echo "   system_ext VINTF: $(grep -c '<hal' "$M") HALs left"

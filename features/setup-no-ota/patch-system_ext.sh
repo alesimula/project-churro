@@ -8,9 +8,10 @@
 # isn't found, nothing is added (setup then asks for the OTA again).
 # Usage: patch-system_ext.sh <extracted system_ext tree>
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 S=$1 H=$(dirname "$0")/../..
 A=$(find "$S/priv-app" -name 'SetupWizardDesktop*.apk' -print -quit 2>/dev/null)
-[ -n "$A" ] || { echo "   system_ext: no desktop SetupWizard (nothing to do)"; exit 0; }
+[ -n "$A" ] || { note "setup-no-ota: no desktop SetupWizard app in system_ext (renamed? setup may demand an update it can't install)"; exit 0; }
 . "$H/versions.env"; . "$H/lib/emu-image.sh"
 
 # Google's build-tools (aapt2, zipalign, apksigner), downloaded once
@@ -22,7 +23,7 @@ if [ ! -f "$B/.done" ]; then
 fi
 B=$(dirname "$(find "$B" -name aapt2 -print -quit)")
 
-[ -z "$("$B/aapt2" dump overlayable "$A")" ] || { echo "   system_ext: setup app limits overlays (nothing to do)"; exit 0; }
+[ -z "$("$B/aapt2" dump overlayable "$A")" ] || { note "setup-no-ota: the setup app now limits overlays: the required-update step stays (setup may get stuck on it)"; exit 0; }
 W=$(mktemp -d); trap 'rm -rf "$W"' EXIT
 mkdir -p "$W/res/raw"
 # raw/wizard_script* resource -> its (obfuscated) file in the APK
@@ -33,7 +34,7 @@ while read -r n f; do
   sed -zE 's/(<result[^>]*wizard:name="ota_available"[^>]*wizard:action=")ota_update"/\1early_update"/g' "$W/in" > "$W/out"
   cmp -s "$W/in" "$W/out" || { mv "$W/out" "$W/res/raw/$n.xml"; echo "   system_ext: setup flow $n: required OTA -> early_update"; }
 done
-ls "$W"/res/raw/*.xml >/dev/null 2>&1 || { echo "   system_ext: no required-OTA step in the setup flow (nothing to do)"; exit 0; }
+ls "$W"/res/raw/*.xml >/dev/null 2>&1 || { note "setup-no-ota: no required-OTA step found in the setup flow scripts (renamed? check setup doesn't demand an update)"; exit 0; }
 
 pkg=$("$B/aapt2" dump packagename "$A")
 sdk=$(sed -n 's/^ro\.system_ext\.build\.version\.sdk=//p' "$S/etc/build.prop")

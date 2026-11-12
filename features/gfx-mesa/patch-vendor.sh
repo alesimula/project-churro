@@ -4,6 +4,7 @@
 # ro.hardware.egl=angle / ro.hardware.vulkan=intel (Intel Gen12+ only).
 # Usage: patch-vendor.sh <extracted vendor tree>       env: CHURRO_MESA=<mesa install dir>
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 V=$1
 M=${CHURRO_MESA:?set CHURRO_MESA to the meson DESTDIR of gfx/build-mesa.sh}
 # the drivers live under meson's default prefix; the VA install (va-libs-path) creates further
@@ -73,9 +74,11 @@ done
 # xattr on a non-SELinux build host (build.prop ended up without its SELinux label).
 edit() { local c; c=$(sed -E "$1" "$2"); printf '%s\n' "$c" > "$2"; }
 # 3. graphics props move from build.prop to boot-time selection (see zz-churro-gfx.rc)
+grep -qE '^ro\.hardware\.(egl|vulkan)=' "$V/build.prop" || note "gfx-mesa: no ro.hardware.egl / ro.hardware.vulkan in vendor build.prop (set elsewhere? they must not override the boot-time choice)"
 edit '/^(ro\.hardware\.egl|ro\.hardware\.vulkan|ro\.hwui\.use_vulkan|debug\.renderengine\.vulkan|debug\.renderengine\.backend)=/d' "$V/build.prop"
 # drm_hwcomposer is set to require the KMS COLOR_PIPELINE plane property, which only Panther
 # Lake-class display hardware has; elsewhere it rejects every plane. Generic PCs: off.
+grep -q '^vendor\.hwc\.drm\.enable_color_pipeline=true$' "$V/build.prop" || note "gfx-mesa: no vendor.hwc.drm.enable_color_pipeline=true in vendor build.prop (renamed? the colour pipeline blanked the screen on other panels)"
 edit 's/^vendor\.hwc\.drm\.enable_color_pipeline=true$/vendor.hwc.drm.enable_color_pipeline=false/' "$V/build.prop"
 # Google tunes the composer for the Lenovo panel: colour mode 13, persistent HDR, log-gamma LUT.
 # On generic panels that gives a colour cast / washed-out picture. Force SDR (as GBRUNCH does):
@@ -97,4 +100,5 @@ EOF
 # driver takes over from simpledrm, simpledrm's "remove card0" and the GPU's "add card0" belong
 # to different devices but name the same node: run out of order, the remove deletes the new
 # /dev/dri/card0 -> drm_hwcomposer finds no display, boots headless (~1 boot in 2). Sequential.
+grep -q '^parallel_ueventd_main_loop enabled$' "$V/etc/ueventd.rc" || note "gfx-mesa: no 'parallel_ueventd_main_loop enabled' in vendor ueventd.rc (renamed or already off?)"
 edit 's/^parallel_ueventd_main_loop enabled$/parallel_ueventd_main_loop disabled/' "$V/etc/ueventd.rc"

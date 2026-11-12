@@ -19,16 +19,20 @@
 # failed" -> reboot. Written in place over the original so it keeps its SELinux label
 # (firmware_tool_exec: the HAL's domain transition) and mode.
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 T=$1
 S=$(mktemp); ${CC:-cc} -static -Os -s -Wall -o "$S" "$(dirname "$0")/crossystem-stub.c"
 "$S" fw_result=success fw_try_count=0 && ! "$S" mainfw_act && ! "$S" || { echo "crossystem stub self-check failed" >&2; exit 1; }
-[ ! -e "$T"/bin/crossystem ] || cat "$S" > "$T"/bin/crossystem; rm -f "$S"
-rm -f "$T"/bin/{flashrom,futility,vpd,fwtool,elogtool} \
-      "$T"/bin/hw/vendor.google.desktop.futility-executor \
-      "$T"/etc/init/{futility-executor,desktop_kernel_max_rollforward_boot}.rc \
-      "$T"/etc/vintf/manifest/vendor.google.desktop.futility-executor.xml \
+if [ -e "$T"/bin/crossystem ]; then cat "$S" > "$T"/bin/crossystem
+else note "firmware-lockdown: no /vendor/bin/crossystem (renamed? the boot-control HAL needs its stub)"; fi; rm -f "$S"
+gone=("$T"/bin/{flashrom,futility,vpd,fwtool,elogtool}
+      "$T"/bin/hw/vendor.google.desktop.futility-executor
+      "$T"/etc/init/{futility-executor,desktop_kernel_max_rollforward_boot}.rc
+      "$T"/etc/vintf/manifest/vendor.google.desktop.futility-executor.xml
       "$T"/bin/{fwupd-binder,fwupd_blocking_update,fwupdmgr} "$T"/etc/init/fwupd.rc
-rm -rf "$T"/usr/share/fwupd "$T"/etc/fwupd
+      "$T"/usr/share/fwupd "$T"/etc/fwupd)
+for f in "${gone[@]}"; do [ -e "$f" ] || note "firmware-lockdown: no /vendor${f#"$T"} (firmware tool renamed? look for its new name)"; done
+rm -rf "${gone[@]}"
 [ ! -e "$T"/bin/vpd ] || { echo "vpd still present" >&2; exit 1; }   # the executor must stay toothless
 
 # Board tuning written to whatever CPU this is: init.ruby.rc sets the Lenovo laptop's RAPL power
@@ -36,17 +40,21 @@ rm -rf "$T"/usr/share/fwupd "$T"/etc/fwupd
 # on an Arrow Lake HX (55 W class: heavily throttled); on a low-power PC it could raise limits
 # past its design. The PC's firmware limits stay in charge. All boards' rc files, in place
 # (rewriting keeps the SELinux xattr; `sed -i` would drop it).
+n=0
 for rc in "$T"/etc/init/*.rc; do
   grep -qE '^\s*write /sys/.*(intel-rapl|tcc_offset)' "$rc" || continue
-  c=$(sed -E '/^\s*write \/sys\/.*(intel-rapl|tcc_offset)/d' "$rc"); printf '%s\n' "$c" > "$rc"
+  c=$(sed -E '/^\s*write \/sys\/.*(intel-rapl|tcc_offset)/d' "$rc"); printf '%s\n' "$c" > "$rc"; n=$((n + 1))
   echo "   vendor: $(basename "$rc"): board CPU power limits / thermal offset removed"
 done
+[ "$n" -gt 0 ] || note "firmware-lockdown: no board power-limit lines (intel-rapl, tcc_offset) in /vendor/etc/init/*.rc"
+n=0
 # vold mounts (rw) or offers to format whatever the fstab's voldmanaged wildcards match. On a
 # Googlebook: SD slot + 2nd NVMe; on a PC: internal disks (Windows' NVMe/eMMC). Keep only USB.
 for f in "$T"/etc/fstab.*; do
   grep -q 'voldmanaged=' "$f" || continue
-  c=$(sed -E '/voldmanaged=/{/^\/devices\/\*\/usb/!d}' "$f"); printf '%s\n' "$c" > "$f"
+  c=$(sed -E '/voldmanaged=/{/^\/devices\/\*\/usb/!d}' "$f"); printf '%s\n' "$c" > "$f"; n=$((n + 1))
   ! grep 'voldmanaged=' "$f" | grep -v '^/devices/\*/usb' >/dev/null || { echo "internal disks still vold-managed in $f" >&2; exit 1; }
   echo "   vendor: $(basename "$f"): vold limited to USB (internal NVMe/eMMC/SD lines removed)"
 done
+[ "$n" -gt 0 ] || note "firmware-lockdown: no voldmanaged lines in /vendor/etc/fstab.* (does vold still leave internal disks alone?)"
 echo "   vendor: firmware updaters removed (flashrom, futility, vpd, fwtool, elogtool, fwupd); crossystem = no-op stub"

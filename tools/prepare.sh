@@ -58,10 +58,16 @@ mkdir -p "$S/bin"
 [ -x "$S/bin/pahole" ] || PAHOLE_VER=$PAHOLE bash "$HERE/tools/build-pahole.sh" "$S/bin"
 
 # --- 3. Churro kernel + module packs ---
-# cache key includes profile + patches + build script + the distro config tag (versions.env):
-# changing any of them rebuilds the kernel. Only that one value, so other version bumps don't.
+# The patch folder for this kernel (series + build number) and its series.env (the distro config
+# tag): docs/09-version-support.md. A kernel build newer than the newest tested one still builds.
+. "$HERE/lib/versions.sh"; PD=$(kernel_patch_dir "$HERE/kmod/patches" "$REL"); . "$PD/series.env"
 . "$HERE/versions.env"
-KH=$({ cat "$HERE/kmod/profiles/$PROF.conf" "$HERE/kmod/build-kernel.sh" "$HERE"/kmod/patches/*.patch 2>/dev/null; echo "$ARCH_LINUX_CONFIG_TAG"; } | md5sum | cut -c1-8)
+log "kernel patches: kmod/patches/${PD##*/}"
+[ "$BID" -le "$CHURRO_TESTED_KBUILD" ] 2>/dev/null ||
+  log "NOTE: kernel build $BID is newer than the newest one tested with these patches ($CHURRO_TESTED_KBUILD), see docs/09-version-support.md"
+# cache key includes profile + patches + build script + the distro config tag: changing any of
+# them rebuilds the kernel. Only that one value, so other version bumps don't.
+KH=$({ cat "$HERE/kmod/profiles/$PROF.conf" "$HERE/kmod/build-kernel.sh" "$PD"/*.patch 2>/dev/null; echo "$ARCH_LINUX_CONFIG_TAG"; } | md5sum | cut -c1-8)
 K=$C/kernel-$PROF-$BID-$KH
 bash "$HERE/tools/extract-certs.sh" "$W/vmlinux" > "$W/gki-certs.pem"
 grep -q BEGIN "$W/gki-certs.pem" || { echo "no signing certificate found in the image kernel" >&2; exit 1; }
@@ -92,7 +98,8 @@ bash "$HERE/tools/make-pack.sh" "$MD" "$P/wifi" cfg80211 mac80211 ath9k
 
 # --- 4. Mesa (rebuilt when its build script or patches change; NVK's Rust parts use the
 #     kernel's Android Rust toolchain + bindgen) ---
-MH=$({ cat "$HERE/gfx/build-mesa.sh" "$HERE"/gfx/mesa-patches/*.patch 2>/dev/null; echo "$MESA_VER $LIBDRM_VER $NDK_VER"; } | md5sum | cut -c1-8)
+MP=$(version_dir "$HERE/gfx/mesa-patches" "${MESA_VER%.*}" "${MESA_VER##*.}")   # the folder build-mesa.sh uses
+MH=$({ cat "$HERE/gfx/build-mesa.sh" "$MP"/*.patch 2>/dev/null; echo "$MESA_VER $LIBDRM_VER $NDK_VER"; } | md5sum | cut -c1-8)
 if [ ! -f "$C/mesa/.built-$MH" ]; then
   CHURRO_RUST=$S/rust CHURRO_BINDGEN=$S/bin CHURRO_CLANG=$S/clang bash "$HERE/gfx/build-mesa.sh" "$C/mesa"
   rm -f "$C"/mesa/.built-*; touch "$C/mesa/.built-$MH"

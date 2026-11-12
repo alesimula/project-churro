@@ -4,7 +4,7 @@
 # emu_part vendor|system: prints the unpacked partition's directory (downloaded/unpacked once).
 emu_part() {
   local p=$1 C=${CHURRO_CACHE:-/var/cache/churro} D Z T L off size
-  D=$C/emu-$p
+  D=$C/emu-$p-$(basename "$CHURRO_EMU_URL" .zip)   # per emulator image: another release's never gets reused
   [ -f "$D/.done" ] && { echo "$D"; return 0; }
   mkdir -p "$C"; Z=$C/$(basename "$CHURRO_EMU_URL")
   [ -f "$Z" ] && echo "$CHURRO_EMU_SHA1  $Z" | sha1sum -c --quiet >/dev/null 2>&1 ||

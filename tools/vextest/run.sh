@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build + run vextest for the Churro VEX #UD emulator (kmod/patches/vex-emulate.patch).
+# Build + run vextest for the Churro VEX #UD emulator (kmod/patches/6.18/vex-emulate.patch).
 #   tools/vextest/run.sh build          compile static test binary (out in /tmp/vextest)
 #   tools/vextest/run.sh native         run on this machine native-only (ground truth check)
 #   tools/vextest/run.sh qemu <bzImage> [emulator-mode]

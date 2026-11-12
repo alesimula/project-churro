@@ -25,10 +25,12 @@ export CARGO_HOME=$WORK/cargo
 export PATH=$WORK/venv/bin:$RUST/bin:$BINDGEN:$CARGO_HOME/bin:$PATH
 [ -x "$CARGO_HOME/bin/cbindgen" ] || cargo install -q --locked --version 0.29.0 cbindgen
 [ -d "android-ndk-$NDK_VER" ] || { curl -fsSL -o ndk.zip "https://dl.google.com/android/repository/android-ndk-$NDK_VER-linux.zip"; unzip -q ndk.zip; rm ndk.zip; }
-# fresh source + gfx/mesa-patches/ on every build
+# fresh source + the patches for this Mesa release (gfx/mesa-patches/<a.b>[-<c>]/) on every build
 [ -f "mesa-$MESA_VER.tar.xz" ] || curl -fsSL -o "mesa-$MESA_VER.tar.xz" "https://archive.mesa3d.org/mesa-$MESA_VER.tar.xz"
 rm -rf "mesa-$MESA_VER"; tar -xJf "mesa-$MESA_VER.tar.xz"
-for p in "$HERE"/mesa-patches/*.patch; do [ -e "$p" ] && patch -d "mesa-$MESA_VER" -p1 -s < "$p"; done
+. "$HERE/../lib/versions.sh"; MP=$(version_dir "$HERE/mesa-patches" "${MESA_VER%.*}" "${MESA_VER##*.}")
+echo "   Mesa $MESA_VER, patches: gfx/mesa-patches/${MP##*/}"
+for p in "$MP"/*.patch; do [ -e "$p" ] && patch -d "mesa-$MESA_VER" -p1 -s < "$p"; done
 NDK=$WORK/android-ndk-$NDK_VER; TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
 cat > cross-android-x86_64 <<EOF
 [binaries]

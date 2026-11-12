@@ -12,7 +12,7 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 # boot. true = let it load (only for Panther Lake-class machines).
 CHURRO_NPU=${CHURRO_NPU:-false}
 . "$HERE/lib/bootimg.sh"; . "$HERE/lib/bootconfig.sh"; . "$HERE/lib/esp.sh"; . "$HERE/lib/ramdisk.sh"; . "$HERE/lib/repack.sh"
-. "$HERE/lib/deps.sh"
+. "$HERE/lib/deps.sh"; . "$HERE/lib/note.sh"
 
 die() { echo "churro: $*" >&2; exit 1; }
 log() { echo ">> $*"; }
@@ -74,6 +74,19 @@ cmd_build() {
     *) die "unknown option $1" ;; esac; done
   need losetup sgdisk mkfs.vfat grub-mkstandalone cpio lz4 od blkid
   [ "$(id -u)" = 0 ] || die "run as root"
+  # The image's Android release and build: they select the pins that must match the image
+  # (versions.env reads versions/api<NN>*.env; docs/09-version-support.md). A build newer than
+  # the newest tested one still builds: the features' own checks decide.
+  local binfo; binfo=$(bash "$HERE/tools/updater/buildinfo.sh" "$in") || die "can't read the build properties of $in"
+  CHURRO_API=$(sed -n 's/^SDK=//p' <<<"$binfo"); CHURRO_IMAGE_BUILD=$(sed -n 's/^INCREMENTAL=//p' <<<"$binfo")
+  [[ $CHURRO_API =~ ^[0-9]+$ ]] || die "no Android API level in $in's build properties"
+  [[ $CHURRO_IMAGE_BUILD =~ ^[0-9]+$ ]] || CHURRO_IMAGE_BUILD=0
+  export CHURRO_API CHURRO_IMAGE_BUILD
+  # shellcheck source=versions.env
+  . "$HERE/versions.env"
+  log "image: $(sed -n 's/^BUILD_ID=//p' <<<"$binfo"), Android API $CHURRO_API, build $CHURRO_IMAGE_BUILD"
+  [ "$CHURRO_IMAGE_BUILD" -le "$CHURRO_TESTED_BUILD" ] ||
+    log "NOTE: image build $CHURRO_IMAGE_BUILD is newer than the newest one tested ($CHURRO_TESTED_BUILD), see docs/09-version-support.md"
 
   if [ "$(realpath "$in")" != "$(realpath -m "$out")" ]; then
     log "copying $in -> $out (sparse)"; cp --sparse=always "$in" "$out"
@@ -89,6 +102,7 @@ cmd_build() {
   fi
   LOOP=$(losetup -f --show -P "$out"); udevadm settle 2>/dev/null || sleep 1
   local W; W=$(mktemp -d /tmp/churro.XXXX); TMPDIRS="$TMPDIRS $W"
+  export CHURRO_NOTES=$W/notes; : > "$CHURRO_NOTES"   # lib/note.sh: listed at the end
 
   log "extracting boot images (slot _a)"
   bootimg_extract "$(part boot_a)" "$W/boot"
@@ -199,6 +213,8 @@ EOF
   # Audio: the board forces SOF on every Intel HD-audio controller (dsp_driver=3), IPC4 and its
   # SoundWire links / topology NHLT. Generic: kernel defaults, i.e. auto-detect like distros
   # (SOF where DMICs/SoundWire need it, else snd_hda_intel; IPC version per platform).
+  grep -qE '(snd_intel_dspcfg\.dsp_driver|snd_sof_pci\.ipc_type|snd_intel_sdw_acpi\.sdw_link_mask|snd_sof_intel_hda_common\.sof_use_tplg_nhlt)=' <<<"$vcmd" ||
+    note "audio: none of the board's audio options in the vendor cmdline (renamed? it may force a driver: $W/vboot/cmdline)"
   vcmd=$(printf '%s' "$vcmd" | sed -E 's/ ?(snd_intel_dspcfg\.dsp_driver|snd_sof_pci\.ipc_type|snd_intel_sdw_acpi\.sdw_link_mask|snd_sof_intel_hda_common\.sof_use_tplg_nhlt)=[^ ]*//g')
   case $vcmd in
     *module_blacklist=*) vcmd=$(printf '%s' "$vcmd" | sed -E "s/module_blacklist=([^ ]*)/module_blacklist=\1,$blk/") ;;
@@ -209,10 +225,13 @@ EOF
 
   log "populating EFI-SYSTEM"
   # churro/build.txt: Google's build + when Churro built this (disk-install: update old -> new)
-  { bash "$HERE/tools/updater/buildinfo.sh" "$in" || echo "churro: warning: no build info for $in" >&2
-    echo "CHURRO_BUILT=$(date -u +%Y-%m-%dT%H:%MZ)"; } > "$W/build.txt"
+  { echo "$binfo"; echo "CHURRO_BUILT=$(date -u +%Y-%m-%dT%H:%MZ)"; } > "$W/build.txt"
   case ",$feats," in *,disk-install,*) export CHURRO_INSTALLER=1 ;; esac
   esp_build "$(part EFI-SYSTEM)" "$W" "$vcmd" "$bsrc" "${ln:+${LOOP}p$ln}"
+  if [ -s "$CHURRO_NOTES" ]; then
+    log "$(wc -l < "$CHURRO_NOTES") thing(s) expected in the image by name but not found; the edits didn't happen (docs/09-version-support.md):"
+    sed 's/^/   - /' "$CHURRO_NOTES"
+  fi
   rm -rf "$W"
   log "done: $out"
 }

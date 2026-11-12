@@ -7,21 +7,24 @@
 #     hal_keymint_default_exec, so no policy changes are needed.
 # Usage: patch-vendor.sh <extracted vendor tree>
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 V=$1
-CACHE=${CHURRO_CACHE:-/var/cache/churro}
 . "$(dirname "$0")/../../versions.env"   # CHURRO_EMU_URL/SHA1 (lib/emu-image.sh)
 
-for n in android.hardware.gatekeeper-service.trusty android.hardware.security.secretkeeper.trusty \
-         android.hardware.security.secretkeeper.trusty.desktop android.hardware.weaver-service.android-desktop \
-         vendor.google.desktop.oemlock-service; do
-  rm -f "$V/etc/init/$n.rc" "$V/etc/vintf/manifest/$n.xml"
+# Exact files, as Google names them (secretkeeper's rc and manifest have different names).
+for f in etc/init/android.hardware.gatekeeper-service.trusty.rc etc/vintf/manifest/android.hardware.gatekeeper-service.trusty.xml \
+         etc/init/android.hardware.security.secretkeeper.trusty.desktop.rc etc/vintf/manifest/android.hardware.security.secretkeeper.trusty.xml \
+         etc/init/android.hardware.weaver-service.android-desktop.rc etc/vintf/manifest/android.hardware.weaver-service.android-desktop.xml \
+         etc/init/vendor.google.desktop.oemlock-service.rc etc/vintf/manifest/vendor.google.desktop.oemlock-service.xml; do
+  [ -e "$V/$f" ] || note "security-software: no /vendor/$f (Trusty/GSC HAL renamed? a leftover one crash-loops at boot)"; rm -f "$V/$f"
 done
 # Also Google-hardware-only services that just fail and restart all session: the Pixel face HAL
 # (talks to a Trusty TA, SIGSEGVs), the EC charge-control HAL (exits at once, init restarts it
 # every 5 s).
-rm -f "$V/apex/com.google.android.hardware.biometrics.face.apex" \
-      "$V/etc/init/hal_desktop_charge_control_default.rc" \
-      "$V/etc/vintf/manifest/com.android.desktop.power.charge_control.xml"
+for f in "$V/apex/com.google.android.hardware.biometrics.face.apex" \
+         "$V/etc/init/hal_desktop_charge_control_default.rc" \
+         "$V/etc/vintf/manifest/com.android.desktop.power.charge_control.xml"; do
+  [ -e "$f" ] || note "security-software: no /vendor${f#"$V"} (face HAL / EC charge control renamed?)"; rm -f "$f"; done
 echo "   vendor: Trusty/GSC HALs, face HAL, EC charge control removed"
 
 # --- the emulator vendor partition (downloaded + unpacked once, lib/emu-image.sh) ---
@@ -60,7 +63,7 @@ echo "   vendor: software KeyMint installed (+libs:$added)"
 # com.android.hardware.gatekeeper.nonsecure APEX as /vendor/bin/hw/android.hardware.gatekeeper-service,
 # which the image's file_contexts already label hal_gatekeeper_default_exec (AOSP's default
 # gatekeeper domain, allowed to register IGatekeeper/default + ISharedSecret/gatekeeper).
-G=$CACHE/emu-gatekeeper
+G=$E-gatekeeper   # beside the emulator image it comes from
 if [ ! -f "$G/.done" ]; then
   rm -rf "$G"; mkdir -p "$G/x"
   unzip -p "$E/apex/com.android.hardware.gatekeeper.nonsecure.apex" apex_payload.img > "$G/p.img"

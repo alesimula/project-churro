@@ -52,7 +52,7 @@ second-stage `init` → panic.
 | Haswell → Comet Lake, Zen 1–3 | + GFNI, SHA-NI, 256-bit VAES/VPCLMULQDQ (BoringSSL, compile-time on); Haswell also ADX | all 23 emulated; GFNI sits in hot loops (libyuv), VAES in AES-GCM → real perf cost |
 | pre-Haswell; Atom without AVX | AVX2/BMI2, everywhere | not feasible |
 
-Plan (implemented): a kernel `#UD` handler (`kmod/patches/vex-emulate.patch`, built from
+Plan (implemented): a kernel `#UD` handler (`kmod/patches/6.18/vex-emulate.patch`, built from
 `tools/vexemu/generate_traps.py`) emulates the 23 instructions userspace hits on a gap CPU:
 AVX-VNNI `vpdpbusd(s)`/`vpdpwssd(s)`, AVX-IFMA `vpmadd52l/huq`, GFNI
 `gf2p8affine[inv]qb`/`gf2p8mulb`, VPCLMULQDQ (VEX 128/256), 256-bit VAES
@@ -152,7 +152,7 @@ module + integrity hash, `OPENSSL_SMALL`, `BORINGSSL_ANDROID_SYSTEM`, static hid
 path and Haswell/Broadwell run plain AES-NI/SSSE3/AVX2 code natively. Installed over
 `/system/lib64` and `/vendor/lib64` `libcrypto.so` + `libssl.so` only if they export every
 dynamic symbol the image's do (names, types, binding, data sizes; extra exports allowed, so a
-newer pinned commit in `versions.env` can pass — struct layouts and behaviour aren't checked). The emulator (incl. the AES/CLMUL
+newer pinned commit (`versions/api37.env`) can pass — struct layouts and behaviour aren't checked). The emulator (incl. the AES/CLMUL
 fast path) stays for everything else. G20AJ: `odsign` 89.8 s → 0.37 s, setup screen 4:02 → 2:08
 (docs/02). The copies inside signed APEXes (Java crypto, TLS, Wi-Fi, Bluetooth):
 
@@ -302,7 +302,7 @@ SurfaceFlinger fail with `Failed to initialize driver` in a loop. Our minigbm bu
 `simpledrm` (card0): `drv_backend_list` covers i915/xe + the dumb drivers (evdi, udl, vkms, …),
 and `vgem`/`simpledrm` are not among them. In QEMU the virtio-gpu backend is used instead,
 which is why it worked there. Worth keeping for debugging and GPU-less machines: the fix is a
-`gfx/minigbm-patches/` patch adding `INIT_DUMB_DRIVER(vgem)` (+ `simpledrm`) to `dumb_driver.c`
+`gfx/minigbm-patches/<api>/` patch adding `INIT_DUMB_DRIVER(vgem)` (+ `simpledrm`) to `dumb_driver.c`
 / `drv_backend_list`, tried **only as a last resort** in `cros_gralloc_driver.cc`
 (`init_try_nodes`). vgem is now loaded only by `gfx-soft.rc`, so it no longer takes renderD128
 from the real GPU (that broke hardware video decoding, "Known gaps"). Then check Mesa's
@@ -322,7 +322,7 @@ adding a second value after it.
 | Other Wi-Fi / BT | distro module set: ath9k/10k/11k/12k, rtw88/89, rtl8xxxu, mt76, brcm, … + their firmware + regulatory.db; they link against the image's cfg80211/mac80211 (CRCs match ours, so the ABI check accepts them). Found on the G20AJ (RTL8821AE, 2026-10-23): Google's GKI config leaves most `WLAN_VENDOR_*` menus off, and `olddefconfig` silently discards every symbol inside a closed vendor menu — only Atheros (of the intended set) survived; `build-kernel.sh` now sets all `WLAN_VENDOR_*` bools =y (taken from the tree, so new vendors are covered). **Confirmed on the G20AJ (2026-10-24): `rtl8821ae` binds, firmware via firmware-extra, `wpa_wlan0` up, Wi-Fi works** | more hardware (the opt-in `wifi` pack is obsolete now); other menu gates (e.g. `NET_VENDOR_*`) untested but ethernet worked so far |
 | Ethernet, USB devices, card readers, touchpads/touchscreens, sensors, HID | distro module set (`drivers-extra`, ~3000 modules, loaded by device alias) | test on more machines |
 | Audio | HDA + SOF from the image + distro codec/amp drivers; SOF firmware/topologies (sof-bin, merged per file), amp tunings via WHENCE; `audio-generic`: board audio cmdline/blocklist/options removed, codec drivers preloaded, HAL config for HD-audio cards (`PCH`, `Generic*`, `Intel`, `sofhdadsp`) bind-mounted over Google's board config, card renamed to the board's ID; works in QEMU (playback reaches the backend) | verify on MSI (speaker, headphones, mic, HDMI). Not covered: see "Known gaps" below |
-| Desktops: lid, battery | Googlebook expects a laptop. No lid switch = "lid closed" → audio master-muted (`kmod/patches/churro-lid.patch`: always-open lid switch); no battery = 0 % on battery power → low-battery warnings, apps refuse ("battery too low") (`kmod/patches/churro-power.patch`: mains power + a full battery). Both only when ACPI has no lid (`PNP0C0D`) / battery (`PNP0C0A`); off with `churro.fakelid=0` / `churro.fakebattery=0` | battery: verify on the G20AJ |
+| Desktops: lid, battery | Googlebook expects a laptop. No lid switch = "lid closed" → audio master-muted (`kmod/patches/6.18/churro-lid.patch`: always-open lid switch); no battery = 0 % on battery power → low-battery warnings, apps refuse ("battery too low") (`kmod/patches/6.18/churro-power.patch`: mains power + a full battery). Both only when ACPI has no lid (`PNP0C0D`) / battery (`PNP0C0A`); off with `churro.fakelid=0` / `churro.fakebattery=0` | battery: verify on the G20AJ |
 | Screen density | Images fix it for their own panel (Lenovo: 240, 2880x1800 15.3"); `display-density` computes it at boot from the main screen's size as the GPU driver reports it (`churro-drm`, the kernel's EDID/DisplayID decoding) as dpi × 240/222, the Lenovo Googlebook's physical UI size whatever the image (1366x768 13.3" → 160), min 160, max = 600 dp on the short side (phone layouts below; Chrome's address bar crashed at 512 dp), no EDID → 160; docs/03 | verify on the T300FA (expect 160), a 1080p laptop, an external-monitor desktop |
 | Modules left out | ~50 the ABI check rejects: some need exports Google's GKI modules trim (usbnet, usb-serial, ptp, nfc, rfkill helpers) or Google built a dependency differently (a few HDA/SoundWire codecs) | ship our builds of those GKI modules too |
 | NPU (`intel_vpu`) | blacklisted (`CHURRO_NPU=false`): froze Arrow Lake | with `firmware-extra` the NPU firmware may now be there → retry with `CHURRO_NPU=true` |
@@ -345,7 +345,7 @@ backend) for the other pre-Gen12 Intel GPUs (Gen9–11: Skylake..Ice Lake, untes
 machine here); Gen12+ keeps Google's stack. hasvk has AHardwareBuffer support built in (unlike
 NVK upstream). On Haswell Mesa logs "Haswell Vulkan support is incomplete". T300FA result:
 Vulkan found, but hasvk reports Vulkan 1.1 on Android (strict mode) and the camera HAL needs
-1.2+ → `gfx/mesa-patches/hasvk-android-api-version.patch` (1.3 on Gen8, 1.2 on Gen7, as on
+1.2+ → `gfx/mesa-patches/26.2/hasvk-android-api-version.patch` (1.3 on Gen8, 1.2 on Gen7, as on
 Linux) → camera streams. Still open: Chrome on ANGLE-Vulkan restarts its GPU process
 (`CreateSharedImage: could not create backing` → context lost; 15× in 40 min with 1.3, 111× in
 10 min with 1.1), not tied to GPU hangs; which buffer fails isn't logged.
@@ -397,7 +397,7 @@ Cause (from Mesa's source): decoder output is multi-planar YUV, one BO with the 
 an offset; Mesa imports each plane as a dma-buf with that offset, and nouveau GL's
 `nouveau_screen_bo_from_handle()` rejects any offset ≠ 0. Android's EGL path then returns
 `EGL_NO_IMAGE` without setting an error, hence `0x3000` (`EGL_SUCCESS`). **Fix (confirmed on the
-G20AJ; now only used on Fermi and older, the rest runs Zink):** `gfx/mesa-patches/nouveau-import-plane-offset.patch`: import the BO at offset 0 and
+G20AJ; now only used on Fermi and older, the rest runs Zink):** `gfx/mesa-patches/26.2/nouveau-import-plane-offset.patch`: import the BO at offset 0 and
 point the resource at the plane (`address`/`offset`, which texturing, render targets, transfers
 and the 2D engine already honour). nvc0 (Fermi-Ampere) only; Tesla's 2D path not adjusted. Zink
 on NVK is not affected (Vulkan takes plane offsets).
@@ -409,7 +409,7 @@ app's buffer) → whole screen frozen. Another run: SIGSEGV in Mesa nouveau unde
 calls. Ruled out by experiment: compression (faults continued with it off in nvc0) and VRAM
 pressure (no buffer ever left VRAM, per a temporary eviction log); faults also hit Play Store,
 GMS's WebView and Gboard. **Fixed** by GL through Zink on NVK instead of nouveau GL: zero faults,
-game runs (`gfx/mesa-patches/nouveau-zink-from-kepler.patch`, Kepler and newer). Remaining app
+game runs (`gfx/mesa-patches/26.2/nouveau-zink-from-kepler.patch`, Kepler and newer). Remaining app
 closes in that test were Google Play services' module updates (docs/02), not GPU problems.
 
 **Hardware video decoding (Intel, `native`): every decode failed.** VivoBook (Tiger Lake, xe):
@@ -426,7 +426,7 @@ Intel machine on `native` (the MSI too).
 (`sofhdadsp`). **PCs without a lid switch** (desktops, mini PCs, VMs): Googlebook's desktop
 services take a missing lid switch for a closed lid and master-mute the audio HAL at boot (every
 output, Bluetooth too), waiting for a "lid opened" that never comes; the kernel patch
-`kmod/patches/churro-lid.patch` registers an always-open lid switch when ACPI has no lid
+`kmod/patches/6.18/churro-lid.patch` registers an always-open lid switch when ACPI has no lid
 (`PNP0C0D`); `churro.fakelid=0` turns it off. Not covered, each needs its own `mk` line in `patch-vendor.sh` and usually mixer
 setup in `mixer_paths.xml` (the controls these codecs need to route sound, which HDA does on its own):
 | Gap | Typical machines | What it needs |
@@ -522,7 +522,7 @@ though it's Meteor Lake graphics. (The interim test build retargeted one compile
 Step 1 (done, works on the MSI's Arrow Lake: detected as graphics IP 12.70): both libraries rebuilt from AOSP `external/minigbm`
 (android17-release, same source as Google's; Google's own build is slightly newer in the core but
 its C++ layout matches) by `gfx/build-minigbm.sh` with the NDK. Patch
-`gfx/minigbm-patches/xe-unknown-gpus.patch`: a GPU missing from the tables is no longer rejected;
+`gfx/minigbm-patches/api37/xe-unknown-gpus.patch`: a GPU missing from the tables is no longer rejected;
 its generation comes from the graphics IP version the xe driver reports (Meteor Lake and newer;
 older Xe GPUs report none and are Gen12). Google's allocator service, mapper and gralloc0 module
 stay: our libraries are linked against the image's libc++ (`std::__1`) and the build checks that
@@ -551,7 +551,7 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   them (107, all equal) and refuses to build on a mismatch. Google's `drm_ttm_helper` lacks one
   function (the fbdev console; GKI has no fbdev), so our build replaces it - allowed only because
   it exports everything Google's does with identical CRCs, so xe keeps loading.
-- **Only where nothing else drives the display** (`kmod/patches/nouveau-hybrid-guard.patch`):
+- **Only where nothing else drives the display** (`kmod/patches/6.18/nouveau-hybrid-guard.patch`):
   nouveau doesn't bind when another display controller exists. Hybrid laptops keep today's Intel
   stack, and simpledrm isn't removed under it. `nouveau.hybrid=1` overrides. Desktops with the
   monitor on the NVIDIA card and the iGPU enabled: disable the iGPU in the BIOS.
@@ -563,18 +563,18 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   the MSI panel) are filtered out, and `nouveau-dsc-off.patch` clears the DSC state laptop
   firmware leaves behind for them. GB20x display fixes from mainline: `nouveau-up-*.patch`.
 - **Buffers:** minigbm's dumb-buffer nouveau backend can't work (dumb buffers aren't allowed on
-  render nodes), so `gfx/minigbm-patches/nouveau-native.patch` allocates with `NOUVEAU_GEM_NEW`:
+  render nodes), so `gfx/minigbm-patches/api37/nouveau-native.patch` allocates with `NOUVEAU_GEM_NEW`:
   linear, pitch aligned to 256, VRAM (may spill to system memory) for anything the GPU or display
   touches, system memory for CPU-only buffers.
 - **Rendering** (`gfx-nouveau.rc`): `ro.hardware.egl=mesa` - Mesa's loader picks Zink on NVK for
-  Kepler and newer (`gfx/mesa-patches/nouveau-zink-from-kepler.patch`; upstream only from Turing,
+  Kepler and newer (`gfx/mesa-patches/26.2/nouveau-zink-from-kepler.patch`; upstream only from Turing,
   the only option from Blackwell on) and nouveau GL for Fermi and older (no NVK there): nouveau GL
   faulted across apps on the G20AJ's Maxwell, Zink on NVK ran clean (docs/02). Override:
   `debug.mesa.nouveau.use.zink=true/false`;
   `ro.hardware.vulkan=nouveau` (NVK) for apps. NVK has no AHardwareBuffer support upstream;
-  `gfx/mesa-patches/nvk-android-hardware-buffer.patch` adds it (Chrome's ANGLE-on-Vulkan needs
+  `gfx/mesa-patches/26.2/nvk-android-hardware-buffer.patch` adds it (Chrome's ANGLE-on-Vulkan needs
   it). SurfaceFlinger and HWUI run Skia on Vulkan (NVK) via `nouveau-ui-vk.rc`; HWUI needs 2
-  graphics queues (`gfx/mesa-patches/nvk-two-graphics-queues.patch`). `androidboot.churro.nouveau_ui=gl`
+  graphics queues (`gfx/mesa-patches/26.2/nvk-two-graphics-queues.patch`). `androidboot.churro.nouveau_ui=gl`
   goes back to Skia on GL (needed on Fermi and older: no Vulkan). Mesa is built with NVK
   (`gfx/build-mesa.sh`): its Rust parts use the kernel's Android Rust toolchain (Android std,
   panic=abort) and bindgen, plus cbindgen and the small libelf Mesa's own Android CI uses.

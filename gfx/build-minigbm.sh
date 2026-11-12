@@ -14,30 +14,32 @@ HERE=$(cd "$(dirname "$0")" && pwd)
 NDK=${CHURRO_NDK:-${CHURRO_MESA:?}/../android-ndk-$NDK_VER}
 SYS=${CHURRO_MESA_SYSROOT:?}                       # static libdrm from build-mesa.sh
 TC=$NDK/toolchains/llvm/prebuilt/linux-x86_64/bin
-API=35 SDK=37                                      # NDK target / Android 17 (Google's build flag)
+API=35 SDK=${CHURRO_API:?}                         # NDK target / the image's Android API level (Google's build flag)
 
-# --- sources: pinned android17-release revisions ---
+# --- sources: the image's Android release's revisions (MINIGBM_* in versions/api<NN>.env), kept
+# per set of pins so another release's image never builds from this one's cached sources ---
 G=https://android.googlesource.com/platform
+HI=$MINIGBM_INTERFACES_REV
+SD=src-$(echo "$MINIGBM_REV $MINIGBM_CORE_REV $MINIGBM_LOGGING_REV $MINIGBM_LIBHARDWARE_REV $MINIGBM_NATIVE_REV $MINIGBM_DMABUFHEAP_REV $MINIGBM_LIBBASE_REV $HI" | md5sum | cut -c1-8)
 get() {  # <dest> <repo> <rev> [path]
-  [ -d "$W/src/$1" ] && return 0
+  [ -d "$W/$SD/$1" ] && return 0
   local u="$G/$2/+archive/$3${4:+/$4}.tar.gz" i
   for i in 1 2 3; do curl -fsSL -o "$W/dl.tgz" "$u" && break; [ $i = 3 ] && { echo "download failed: $u" >&2; exit 1; }; sleep 5; done
-  rm -rf "$W/src/$1.tmp"; mkdir -p "$W/src/$1.tmp"; tar -xzmf "$W/dl.tgz" -C "$W/src/$1.tmp"; rm "$W/dl.tgz"; mv "$W/src/$1.tmp" "$W/src/$1"
+  rm -rf "$W/$SD/$1.tmp"; mkdir -p "$W/$SD/$1.tmp"; tar -xzmf "$W/dl.tgz" -C "$W/$SD/$1.tmp"; rm "$W/dl.tgz"; mv "$W/$SD/$1.tmp" "$W/$SD/$1"
 }
-HI=0162af698935100a590b7359581ac8b1b80693e5
-get minigbm    external/minigbm ce79bbee67b3e2ea7abb110e1415e9ceceaa6471
-get cutils     system/core 545d2487e38192a2ce25040897ced877cf6b4f53 libcutils/include
-get libsystem  system/core 545d2487e38192a2ce25040897ced877cf6b4f53 libsystem/include
-get libsync    system/core 545d2487e38192a2ce25040897ced877cf6b4f53 libsync/include
-get liblog     system/logging d35ba620451b28512f46ebb5421f783fd77968d5 liblog/include
-get hardware   hardware/libhardware 97ee3e33ec5ba48c0eca8341ed377ac4497a0678 include_all
-get nwindow    frameworks/native ae266dcb706d083868578cfedce381ef44488a07 libs/nativewindow/include
-get nbase      frameworks/native ae266dcb706d083868578cfedce381ef44488a07 libs/nativebase/include
-get arect      frameworks/native ae266dcb706d083868578cfedce381ef44488a07 libs/arect/include
-get binder-cpp frameworks/native ae266dcb706d083868578cfedce381ef44488a07 libs/binder/ndk/include_cpp
-get binder-ndk frameworks/native ae266dcb706d083868578cfedce381ef44488a07 libs/binder/ndk/include_ndk
-get dmabufheap system/memory/libdmabufheap 09fe72b6ce0feead1b97c2859979b125f815d9b0 include
-get libbase    system/libbase fef4173e19d97cd4b4fc09a06bccbf800d0d3937 include
+get minigbm    external/minigbm "$MINIGBM_REV"
+get cutils     system/core "$MINIGBM_CORE_REV" libcutils/include
+get libsystem  system/core "$MINIGBM_CORE_REV" libsystem/include
+get libsync    system/core "$MINIGBM_CORE_REV" libsync/include
+get liblog     system/logging "$MINIGBM_LOGGING_REV" liblog/include
+get hardware   hardware/libhardware "$MINIGBM_LIBHARDWARE_REV" include_all
+get nwindow    frameworks/native "$MINIGBM_NATIVE_REV" libs/nativewindow/include
+get nbase      frameworks/native "$MINIGBM_NATIVE_REV" libs/nativebase/include
+get arect      frameworks/native "$MINIGBM_NATIVE_REV" libs/arect/include
+get binder-cpp frameworks/native "$MINIGBM_NATIVE_REV" libs/binder/ndk/include_cpp
+get binder-ndk frameworks/native "$MINIGBM_NATIVE_REV" libs/binder/ndk/include_ndk
+get dmabufheap system/memory/libdmabufheap "$MINIGBM_DMABUFHEAP_REV" include
+get libbase    system/libbase "$MINIGBM_LIBBASE_REV" include
 get aidl-gc7   hardware/interfaces $HI graphics/common/aidl/aidl_api/android.hardware.graphics.common/7
 get aidl-hc2   hardware/interfaces $HI common/aidl/aidl_api/android.hardware.common/2
 if [ ! -x "$W/bt/aidl" ]; then   # AIDL compiler from the SDK build-tools
@@ -48,14 +50,16 @@ fi
 # --- AIDL NDK headers (graphics.common V7 + its android.hardware.common V2 import) ---
 B=$W/build; rm -rf "$B"; mkdir -p "$B/gen" "$B/link" "$B/cxx" "$W/out"
 for d in aidl-hc2:2 aidl-gc7:7; do
-  r=$W/src/${d%:*}
+  r=$W/$SD/${d%:*}
   "$W/bt/aidl" --lang=ndk --structured --stability=vintf --version="${d#*:}" --hash="$(tail -1 "$r/.hash")" \
-    -I "$W/src/aidl-hc2" -I "$W/src/aidl-gc7" -h "$B/gen" -o "$B/gen/src" $(find "$r" -name '*.aidl')
+    -I "$W/$SD/aidl-hc2" -I "$W/$SD/aidl-gc7" -h "$B/gen" -o "$B/gen/src" $(find "$r" -name '*.aidl')
 done
 
 # --- minigbm + patches ---
-cp -r "$W/src/minigbm" "$B/minigbm"
-for p in "$HERE"/minigbm-patches/*.patch; do patch -d "$B/minigbm" -p1 -s < "$p"; done
+cp -r "$W/$SD/minigbm" "$B/minigbm"
+# patches for this image's Android release (and build): gfx/minigbm-patches/api<NN>[-<build>]/
+. "$HERE/../lib/versions.sh"; MP=$(version_dir "$HERE/minigbm-patches" "api$SDK" "${CHURRO_IMAGE_BUILD:-0}")
+for p in "$MP"/*.patch; do patch -d "$B/minigbm" -p1 -s < "$p"; done
 
 # libc++: NDK headers, platform ABI namespace, the image's libc++.so
 sed 's/_LIBCPP_ABI_NAMESPACE __ndk1/_LIBCPP_ABI_NAMESPACE __1/' \
@@ -66,9 +70,9 @@ echo 'int sync_wait(int fd, int timeout) { return fd + timeout; }' | \
   "$TC/x86_64-linux-android$API-clang" -shared -x c - -o "$B/link/libsync.so" -Wl,-soname,libsync.so
 
 M=$B/minigbm
-INC="-I$M -I$M/external -I$W/src/cutils -I$W/src/libsystem -I$W/src/libsync -I$W/src/liblog
-  -I$W/src/hardware -I$W/src/nwindow -I$W/src/nbase -I$W/src/arect -I$W/src/dmabufheap -I$B/gen
-  -I$W/src/binder-cpp -I$W/src/binder-ndk -I$W/src/libbase
+INC="-I$M -I$M/external -I$W/$SD/cutils -I$W/$SD/libsystem -I$W/$SD/libsync -I$W/$SD/liblog
+  -I$W/$SD/hardware -I$W/$SD/nwindow -I$W/$SD/nbase -I$W/$SD/arect -I$W/$SD/dmabufheap -I$B/gen
+  -I$W/$SD/binder-cpp -I$W/$SD/binder-ndk -I$W/$SD/libbase
   -I$SYS/include -I$SYS/include/libdrm"
 DEF="-DDRV_I915 -DDRV_XE -DHAS_DMABUF_SYSTEM_HEAP -DANDROID_API_LEVEL=$SDK -D_GNU_SOURCE=1
   -D_FILE_OFFSET_BITS=64 -D__ANDROID_VNDK__ -D__ANDROID_VENDOR__"
@@ -96,4 +100,4 @@ for so in libminigbm_gralloc.so libgbm.so; do
   [ -z "$miss" ] || { echo "$so: symbols the image needs but this build lacks:" >&2; echo "$miss" | head -20 >&2; exit 1; }
   echo "   $so: $(echo "$need" | grep -c .) symbols used by $(echo "$users" | grep -c .) image binaries, all present"
 done
-echo "   minigbm built: $(ls "$W"/out | tr '\n' ' ')"
+echo "   minigbm built: $(ls "$W"/out | tr '\n' ' ')(patches: ${MP##*/})"

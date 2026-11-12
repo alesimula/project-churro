@@ -112,7 +112,7 @@ auto-mounts USB drives: internal and secondary disks stay untouched.
 2. **Kernel**: Churro rebuilds **the very same kernel** as the image's GKI from Google's public
    source (same commit, config, toolchain, release string and kABI CRCs — the image's own modules
    still load), picked automatically from the image, without KMI trimming, with small fixes in
-   `kmod/patches/` and extra drivers: i915 (older Intel), simpledrm (any UEFI framebuffer), SATA (AHCI/IDE), Intel VMD, virtio, vgem, and a
+   `kmod/patches/<series>/` and extra drivers: i915 (older Intel), simpledrm (any UEFI framebuffer), SATA (AHCI/IDE), Intel VMD, virtio, vgem, and a
    distro-like module set (Arch Linux's driver modules, ~3000) that `features/drivers-extra`
    adds to vendor_dlkm after an ABI check; Android loads them by device ID, like udev.
    `features/firmware-extra` adds their firmware (linux-firmware, Intel SOF audio, regulatory.db);
@@ -143,7 +143,8 @@ auto-mounts USB drives: internal and secondary disks stay untouched.
 
 Nothing Google-owned is shipped: inputs are the user's recovery image plus files the script
 downloads from public servers (Google's GKI source/toolchains, emulator image and BoringSSL;
-Mesa, linux-firmware, Arch's kernel config, ...; versions pinned in `versions.env`) or builds
+Mesa, linux-firmware, Arch's kernel config, ...; versions pinned in `versions.env` and, where they
+must match the image, in `versions/` and `kmod/patches/<series>/`) or builds
 from source.
 
 ## Layout
@@ -151,7 +152,7 @@ from source.
 | Path | What |
 |---|---|
 | `churro.sh` | `auto` / `build` / `install` |
-| `versions.env` | every pinned version the build downloads (kernel driver config, firmware, Mesa, NDK, emulator image, BoringSSL, tools), one section each |
+| `versions.env` | pinned versions of what the build downloads (firmware, Mesa, NDK, tools), one section each; the ones that must match the image are in `versions/api<NN>.env` (Android release: emulator image, BoringSSL, minigbm) and `kmod/patches/<series>/` (kernel: patches, driver config tag). How one checkout supports several image versions: [docs/09](docs/09-version-support.md) |
 | `lib/` | boot image + vendor_boot parser, bootconfig, ramdisk, ESP/GRUB, EROFS/super/vbmeta patching (`lpinfo.py`) |
 | `features/` | partition overlays + patch scripts: `security-software`, `firmware-lockdown`, `firmware-extra`, `drivers-extra`, `audio-generic`, `display-density`, `disk-install`, `gfx-mesa`, `gfx-minigbm`, `gpu-nouveau`, `crypto-generic`, `libs-generic`, `setup-no-ota`, `debug-log` (all default), `security-trusty-vm` (experimental) |
 | `crypto/` | BoringSSL builds for Android (`build-boringssl.sh` platform copy, `build-boringssl-httpengine.sh` HttpEngine's) |

@@ -9,22 +9,28 @@
 set -euo pipefail
 SRC=$1 CLANG=$2 RUST=$3 BINDGEN=$4 CFG=$5 REL=$6 PROF=$7 OUT=$8
 HERE=$(cd "$(dirname "$0")" && pwd)
-. "$HERE/../versions.env"   # ARCH_LINUX_CONFIG_TAG, used by the profile
+# the patch folder for this kernel (series + build number in $REL) and its series.env
+# (ARCH_LINUX_CONFIG_TAG, used by the profile): docs/09-version-support.md
+. "$HERE/../lib/versions.sh"; PD=$(kernel_patch_dir "$HERE/patches" "$REL")
+. "$PD/series.env"; . "$HERE/../versions.env"
 Y="" M="" N=""; . "$HERE/profiles/$PROF.conf"
 export PATH="$CLANG/bin:$RUST/bin:$BINDGEN:$PATH"
 # bindgen must use the Android clang's libclang, not a distro one (unknown -W options otherwise)
 export LIBCLANG_PATH="$CLANG/lib"
 O=$SRC/out-kernel-$PROF; mkdir -p "$O"
-# kmod/patches/*.patch: small built-in fixes (no exported types touched -> CRCs unchanged).
+# $PD/*.patch: small built-in fixes (no exported types touched -> CRCs unchanged).
 # Applied copies are recorded in $SRC/.churro-applied: a patch that was edited or deleted since
-# is reversed first, so the cached source tree always matches kmod/patches.
+# is reversed first, so the cached source tree always matches the patch folder. A patch the
+# source already contains (Google merged the fix: it applies in reverse) is skipped.
 A=$SRC/.churro-applied; mkdir -p "$A"
 for a in "$A"/*.patch; do
   [ -e "$a" ] || continue
-  cmp -s "$a" "$HERE/patches/${a##*/}" || { patch -d "$SRC" -p1 -R -s < "$a"; rm "$a"; }
+  cmp -s "$a" "$PD/${a##*/}" || { patch -d "$SRC" -p1 -R -s < "$a"; rm "$a"; }
 done
-for p in "$HERE"/patches/*.patch; do
+for p in "$PD"/*.patch; do
   [ -e "$p" ] && [ ! -e "$A/${p##*/}" ] || continue
+  if patch -d "$SRC" -p1 -R -s -f --dry-run < "$p" >/dev/null 2>&1; then
+    echo "   ${p##*/}: already in the kernel source, skipped"; continue; fi
   patch -d "$SRC" -p1 -s -N < "$p"; cp "$p" "$A/"
 done
 # KBUILD_GENDWARFKSYMS_STABLE: GKI computes symbol CRCs in "--stable" (kABI-aware) mode; without

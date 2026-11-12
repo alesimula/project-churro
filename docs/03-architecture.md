@@ -49,9 +49,10 @@ firmware leaves `$cmdpath` empty), else by `$cmdpath`, else the first disk with 
   (struct fields in netdevice.h, i2c.h, sched.h, …; they'd change hundreds of GKI CRCs) are kept
   off by leaving out whatever selects them (select chains followed automatically: e.g. iavf →
   NET_SHAPER, two I2C bus drivers → I2C_SLAVE).
-  Small built-in source fixes live in `kmod/patches/*.patch` (applied copies recorded in
-  `<src>/.churro-applied`, edited/removed patches reversed automatically; the kernel cache dir is
-  keyed on profile + patches + build script):
+  Small built-in source fixes live in `kmod/patches/<series>/*.patch` (today `6.18/`; the folder
+  is picked from the image's kernel, docs/09; applied copies recorded in
+  `<src>/.churro-applied`, edited/removed patches reversed automatically, a patch the source
+  already contains is skipped; the kernel cache dir is keyed on profile + patches + build script):
   - `drm-remove-firmware-fb` — DRM core removes the firmware framebuffer (simpledrm) when any PCI
     display driver registers. Google's prebuilt xe never does it (no EFI framebuffer on
     Googlebooks), so simpledrm stayed and hwcomposer used it as the primary display (black screen).
@@ -89,7 +90,10 @@ firmware leaves `$cmdpath` empty), else by `$cmdpath`, else the first disk with 
     `vt-no-ctrl-alt-del`): Churro behaviour, not upstream fixes — rebase them, their header says
     why they exist.
 
-  **Planned (not implemented): kernel-version-aware build.** Today everything is written for one
+  **Kernel-version-aware build: see [docs/09-version-support.md](09-version-support.md)** (patch
+  folders and the Arch tag per kernel series are implemented; docs/09 also covers the pins that
+  follow the image's Android build, and wins where it differs from the older plan below, e.g. the
+  Arch tag is pinned per series, not derived). The plan as first written: today everything is written for one
   kernel (GKI 6.18.21 of this image). On a nearby kernel most patches would still apply (`patch`
   tolerates shifted lines); the ones that touch moving code (`vex-emulate` in the x86 trap
   handler, the nouveau display patches) are the likely breaks, and a backport the new kernel
@@ -127,7 +131,8 @@ firmware leaves `$cmdpath` empty), else by `$cmdpath`, else the first disk with 
   - *Patches already upstream:* before applying, try the patch in reverse (`patch -R
     --dry-run`); if that succeeds the source already has it → skip and log.
   - Anything that neither applies nor is already present still stops the build (as now).
-  The same scheme fits `gfx/mesa-patches` keyed on `MESA_VER` (which we choose, not the image).
+  The same scheme fits `gfx/mesa-patches` keyed on `MESA_VER` (which we choose, not the image):
+  done, with `gfx/minigbm-patches` keyed on the Android release (docs/09).
 
   **Hypothetical: one script for several Android releases (17, 18, 19 …).** Read the release
   from the image (`ro.build.version.release`/`sdk`, kernel series) and split the pins three ways:
@@ -347,7 +352,7 @@ files get a sibling's label or an explicit one.
   PC keeps the size picked on the first).
 * `gfx-minigbm` (default) — the graphics buffer allocator libraries (`libminigbm_gralloc.so`,
   `libgbm.so`) rebuilt from AOSP `external/minigbm` (android17-release, the source of Google's
-  own build) by `gfx/build-minigbm.sh` with the NDK, plus `gfx/minigbm-patches/`. Google's build
+  own build) by `gfx/build-minigbm.sh` with the NDK, plus `gfx/minigbm-patches/api<NN>/`. Google's build
   rejects every GPU missing from its ID tables; ours asks the xe kernel driver for the GPU's
   graphics IP version instead (any Intel Xe GPU works), and on nouveau allocates real buffers
   (`NOUVEAU_GEM_NEW`, VRAM) instead of dumb buffers, which render nodes refuse. Google's allocator service, mapper and
@@ -383,7 +388,7 @@ files get a sibling's label or an explicit one.
   injector). libc++ is static and hidden, compiled in the platform `std::__1` namespace because
   libcrypto exports two C++ helpers taking `std::atomic`. The build stops unless both libraries
   export every dynamic symbol the image's do (same type, binding, data size; extras are allowed
-  and counted, so a newer `BORINGSSL_REV` in `versions.env` can pass — layouts aren't checked). System is the first feature partition mounted at
+  and counted, so a newer `BORINGSSL_REV` (`versions/api37.env`) can pass — layouts aren't checked). System is the first feature partition mounted at
   `/` (`patch-system.sh`, files under `system/`). New recovery image: the gate tells whether
   `REV` still matches. The 11 APEX copies of the same libraries (Conscrypt, Tethering, Wi-Fi,
   Bluetooth, ...) are covered by bind mounts at boot (`churro-apex-crypto.rc`), not
@@ -443,8 +448,10 @@ unpinned.
 Files involved (each has comments explaining the why):
 | File | Role |
 |---|---|
-| `versions.env` | every pinned version: Arch config tag, linux-firmware, sof-bin, wireless-regdb, Mesa/libdrm/NDK, emulator image, BoringSSL + Go, erofs-utils |
-| `kmod/profiles/generic.conf` | `DISTRO_CONFIG` (URL of the pinned distro config, tag from `versions.env`), `DISTRO_DIRS` (regex: Kconfig file locations whose modules are taken), `DISTRO_DENY` (regex: symbols never taken), optional `DISTRO_BUILTIN_OK` (space-separated core options checked to be harmless) |
+| `versions.env` | pinned versions that don't depend on the image: linux-firmware, sof-bin, wireless-regdb, Mesa/libdrm/NDK, Go, erofs-utils |
+| `kmod/patches/<series>/series.env` | the Arch config tag for that kernel series (docs/09) |
+| `versions/api<NN>.env` | pins that follow the image's Android release: emulator image, BoringSSL, minigbm (docs/09) |
+| `kmod/profiles/generic.conf` | `DISTRO_CONFIG` (URL of the pinned distro config, tag from the series' `series.env`), `DISTRO_DIRS` (regex: Kconfig file locations whose modules are taken), `DISTRO_DENY` (regex: symbols never taken), optional `DISTRO_BUILTIN_OK` (space-separated core options checked to be harmless) |
 | `kmod/build-kernel.sh` | the `if [ -n "${DISTRO_CONFIG:-}" ]` block: picks the symbols, adds them as `=m`, keeps core-struct options off (follows `select`/`imply` chains), refuses to weaken built-ins |
 | `tools/prepare.sh` | kABI check after the build: all GKI export CRCs must equal Google's `vmlinux.symvers`, else the kernel is rejected; copies `Module.symvers` into the kernel cache dir |
 | `features/drivers-extra/patch-vendor_dlkm.sh` (+ `skip.txt`) | installs every module of our build that the image lacks into vendor_dlkm, after a `depmod -e -E` ABI check against the image's own modules; prints what it left out and why |
@@ -457,7 +464,8 @@ Steps:
    different Kconfig symbols). Arch Linux keeps one per release tag:
    `https://gitlab.archlinux.org/archlinux/packaging/packages/linux/-/raw/<tag>/config`, tags
    look like `6.18.9.arch1-1` (list them on that repo's tags page; not every point release has
-   one). Put the tag in `ARCH_LINUX_CONFIG_TAG` (`versions.env`). Any distro's full kernel
+   one). Put the tag in `ARCH_LINUX_CONFIG_TAG` (`kmod/patches/<series>/series.env`; from
+   6.18.13 on the file is called `config.x86_64`: `ARCH_LINUX_CONFIG_FILE`). Any distro's full kernel
    config works the same way (Debian/Fedora), as long as the version matches: then change the
    `DISTRO_CONFIG` URL in the profile.
 3. Firmware pins (`versions.env`, "Firmware" section, or override with the env vars):
@@ -511,14 +519,19 @@ it in order; each step says where the assumption lives and how to check it.
    vs the new image's policy: secilc's message names the rule; `tools/check-sepolicy.sh` compiles
    it like init does, with a pinned upstream secilc, `SELINUX_VER`, minus Android-only lines).
    Warnings: `display-density: WARNING ro.sf.lcd_density=… in <partition>` (the density stays fixed).
-2. **Android release pins** (only change with a new Android version, not a new build):
-   - software KeyMint: `CHURRO_EMU_URL`/`CHURRO_EMU_SHA1` at the top of
-     `features/security-software/patch-vendor.sh` = Google's public x86_64 emulator system image
+2. **Android release pins** (`versions/api<NN>.env`, docs/09; a new Android version needs a new
+   file, a new build of the same version only if a check fails):
+   - software KeyMint: `CHURRO_EMU_URL`/`CHURRO_EMU_SHA1` = Google's public x86_64 emulator system image
      of the **same Android release** (sys-img `google_apis/x86_64-<API>.0_rNN.zip`). A mismatch
      shows as keystore2/KeyMint errors at boot (`Failed to construct mandatory security level TEE`,
      docs/02). Update URL + SHA1 together.
-   - minigbm (`android17-release`) and Mesa/NDK pins in `gfx/build-*.sh`.
-3. **Edits matched by file name — these skip silently if names change. Check them by hand:**
+   - minigbm and its AOSP headers (`MINIGBM_*`, `android17-release` commits); the AIDL versions
+     it compiles (`graphics.common` 7, `common` 2) are in `gfx/build-minigbm.sh`. Mesa/NDK pins
+     don't follow the image (`versions.env`).
+3. **Edits matched by file name.** When one finds nothing, the build prints a `NOTE:` there and
+   lists all of them again before `done:` (`lib/note.sh`; nothing is listed on the images tested so
+   far). A note means "look for the new name"; what it can't see is a *new* tool or option, so
+   still check these by hand:
    - *Safety* (`features/firmware-lockdown/patch-vendor.sh`, docs/05 safety table): the list of
      removed flash/firmware tools (`flashrom futility vpd fwtool elogtool fwupd`, the futility
      executor HAL). On a new image list `vendor/bin`, `vendor/bin/hw`, `vendor/etc/init` and

@@ -7,6 +7,7 @@
 # the fallback when no screen is found.
 # Android's Display size setting stays on top.
 set -euo pipefail
+. "$(dirname "$0")/../../lib/note.sh"
 T=$1; F=$(dirname "$0")
 CFG=u:object_r:vendor_configs_file:s0
 ref=$(sed -n 's/^ro\.sf\.lcd_density=//p' "$T/build.prop" | tail -1)
@@ -19,7 +20,7 @@ for p in system_a system_ext_a product_a odm_a; do
   L=$(losetup -f --show -r -o "$off" --sizelimit "$size" "$CHURRO_SUPER")
   for f in /build.prop /system/build.prop /etc/build.prop /prop.default /system/etc/prop.default; do
     v=$("$EROFS_BIN/dump.erofs" --cat --path=$f "$L" 2>/dev/null | sed -n 's/^ro\.sf\.lcd_density=//p' | tail -1) || true
-    [ -z "$v" ] || echo "   vendor: display-density: WARNING ro.sf.lcd_density=$v in ${p%_a}$f wins: density stays $v (remove it there)"
+    [ -z "$v" ] || note "display-density: ro.sf.lcd_density=$v in ${p%_a}$f wins: density stays $v (remove it there)"
   done
   losetup -d "$L"
 done
