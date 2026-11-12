@@ -55,8 +55,10 @@ cd "mesa-$MESA_VER"
 # Intel and NVIDIA drivers precompile OpenCL-C kernels at build time: build the host tools
 # (mesa_clc, vtn_bindgen2) natively first - they need LLVM/Clang/libclc/SPIRV-LLVM-Translator.
 if [ ! -x "$WORK/host-tools/bin/mesa_clc" ]; then
+  # SPIRV-Tools.pc: in spirv-tools up to Ubuntu 24.04, split out to spirv-tools-dev since 26.04
+  spvt=spirv-tools; apt-cache show spirv-tools-dev >/dev/null 2>&1 && spvt=spirv-tools-dev
   apt-get install -y -qq llvm-18-dev libclang-18-dev libclc-18-dev libllvmspirvlib-18-dev clang-18 \
-    libdrm-dev libexpat1-dev zlib1g-dev >/dev/null
+    libdrm-dev libexpat1-dev zlib1g-dev "$spvt" >/dev/null
   rm -rf build-host
   meson setup build-host --prefix="$WORK/host-tools" --buildtype release \
     -Dgallium-drivers= -Dvulkan-drivers= -Dplatforms= -Dglx=disabled -Degl=disabled -Dgbm=disabled \
