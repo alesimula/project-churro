@@ -5,6 +5,9 @@
 #                               [--features a,b] [--boot-source external|internal]
 #        sudo ./churro.sh install <churro.img> <disk>
 set -euo pipefail
+# sort/join/comm must agree on one collation: with en_US.UTF-8, sort output is "unsorted" for
+# join, which exits 1 and (pipefail + 2>/dev/null) silently aborts the build
+export LC_ALL=C
 HERE=$(cd "$(dirname "$0")" && pwd)
 
 # NPU (Intel "VPU" AI accelerator) driver. The image only ships Panther Lake NPU firmware; on
