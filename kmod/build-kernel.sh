@@ -7,6 +7,9 @@
 # Usage: kmod/build-kernel.sh <ack src> <clang dir> <rust dir> <bindgen dir> <ikconfig> <kernel release> <profile> <out dir>
 #   profile = kmod/profiles/<name>.conf with:  Y="SYSFB_SIMPLEFB ..."  M="DRM_I915 ..."  N="..."
 set -euo pipefail
+# sort/join/comm must agree on one collation: with en_US.UTF-8, sort output is "unsorted" for
+# join, which exits 1 and (pipefail + 2>/dev/null) silently aborts the build
+export LC_ALL=C
 SRC=$1 CLANG=$2 RUST=$3 BINDGEN=$4 CFG=$5 REL=$6 PROF=$7 OUT=$8
 HERE=$(cd "$(dirname "$0")" && pwd)
 # the patch folder for this kernel (series + build number in $REL) and its series.env

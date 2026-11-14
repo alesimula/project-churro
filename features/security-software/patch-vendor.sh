@@ -35,7 +35,8 @@ emu_same_api "$V/build.prop" "$E/build.prop" || exit 1
 
 # --- install KeyMint + its missing libraries (dependency closure) ---
 lbl() { setfattr -n security.selinux -v "$2" "$1"; }
-install -m 0755 -o root -g 2000 "$E/bin/hw/android.hardware.security.keymint-service" "$V/bin/hw/"
+install -m 0755 "$E/bin/hw/android.hardware.security.keymint-service" "$V/bin/hw/"
+chown root:2000 "$V/bin/hw/android.hardware.security.keymint-service"   # numeric gid: uutils install -g rejects it
 lbl "$V/bin/hw/android.hardware.security.keymint-service" u:object_r:hal_keymint_default_exec:s0
 install -m 0644 "$E/etc/init/android.hardware.security.keymint-service.rc" "$V/etc/init/"
 lbl "$V/etc/init/android.hardware.security.keymint-service.rc" u:object_r:vendor_configs_file:s0
@@ -72,7 +73,7 @@ if [ ! -f "$G/.done" ]; then
   touch "$G/.done"
 fi
 gk=$V/bin/hw/android.hardware.gatekeeper-service
-install -m 0755 -o root -g 2000 "$G/x/bin/hw/android.hardware.gatekeeper-service.nonsecure" "$gk"
+install -m 0755 "$G/x/bin/hw/android.hardware.gatekeeper-service.nonsecure" "$gk"; chown root:2000 "$gk"
 lbl "$gk" u:object_r:hal_gatekeeper_default_exec:s0
 printf '%s\n' 'service vendor.gatekeeper-default /vendor/bin/hw/android.hardware.gatekeeper-service' \
   '    class early_hal' '    user system' '    group system' > "$V/etc/init/android.hardware.gatekeeper-service.rc"

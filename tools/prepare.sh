@@ -8,6 +8,9 @@
 # Everything lands in $CHURRO_CACHE (default /var/cache/churro); re-runs reuse it.
 # Usage: tools/prepare.sh <recovery.bin> [kernel profile=generic]
 set -euo pipefail
+# sort/join/comm must agree on one collation: with en_US.UTF-8, sort output is "unsorted" for
+# join, which exits 1 and (pipefail + 2>/dev/null) silently aborts the build
+export LC_ALL=C
 HERE=$(cd "$(dirname "$0")/.." && pwd)
 IMG=$1 PROF=${2:-generic}
 C=${CHURRO_CACHE:-/var/cache/churro}; mkdir -p "$C"

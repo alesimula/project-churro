@@ -48,8 +48,10 @@ export found espid
 echo "Churro: found=$found cmdpath=$cmdpath espid=$espid root=$root"
 configfile "($root)/churro/grub.cfg"
 EOF
+  # efi_uga (pre-GOP firmware video) is gone from GRUB 2.14 (Ubuntu 26.04): add it only if present
+  local uga=; [ -f /usr/lib/grub/x86_64-efi/efi_uga.mod ] && uga=efi_uga
   grub-mkstandalone -O x86_64-efi -o "$mnt/EFI/BOOT/BOOTX64.EFI" \
-    --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop efi_uga probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
+    --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop $uga probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
     --locales="" --fonts="" "boot/grub/grub.cfg=$stub"
   rm -f "$stub"
   # where CHURRO-ESPID's UUID sits in the binary (churro-install: toybox grep has no byte offsets)

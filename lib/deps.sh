@@ -5,11 +5,12 @@
 #   kernel config/vmlinux extraction: lz4 zstd xz-utils bzip2 (extract-ikconfig fails with
 #     "Cannot find kernel config" when the kernel's decompressor is missing)
 #   setup-no-ota: default-jre-headless (keytool + the build-tools apksigner)
+#   Mesa Vulkan drivers: glslang-tools (glslangValidator compiles their built-in shaders)
 #   builds (kernel, pahole, erofs-utils, Mesa, static helpers): the rest
 CHURRO_PKGS="gdisk dosfstools parted grub-common grub-efi-amd64-bin cpio attr kmod openssl curl git unzip
   python3 python3-venv binutils lz4 zstd xz-utils bzip2 build-essential flex bison bc rsync pkg-config
   cmake ninja-build libssl-dev libelf-dev libdw-dev zlib1g-dev autoconf automake libtool liblz4-dev
-  uuid-dev libselinux1-dev default-jre-headless"
+  uuid-dev libselinux1-dev default-jre-headless glslang-tools"
 # tools/updater (needs no root): sgdisk, curl, unzip, python3, plus dump.erofs >= 1.8 for
 # buildinfo.sh (`--cat`; Ubuntu 24.04 ships 1.7.1), built into tools/bin with these packages.
 UPDATER_PKGS="gdisk curl unzip python3"
