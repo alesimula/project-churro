@@ -95,6 +95,10 @@ stick. Do it **before the first start**: Android formats the partition then, at 
 and that encrypted filesystem can't be grown safely from outside. On a stick that was already
 started the tool only offers ERASE (`--erase`): it grows the partition and clears Android's
 data, which then sets itself up again with all the space.
+To look inside a stick from Windows, `tools\mount-partition.bat` (same disk picking and checks)
+mounts one partition from a short list (EFI-SYSTEM with GRUB's `env.cfg`, CHURRO-LOG, system,
+product, vendor, the module partitions, userdata) in WSL and opens it in Explorer; Android's
+partitions are read-only. Enter in its window unmounts it and gives the stick back to Windows.
 Install to an internal disk **from the stick itself**: boot menu > "Install to an internal disk" >
 "Update an install" (rewrites the system, keeps Android's data and apps, shows the old and the
 new version) or "New install" (erases the disk you pick, whatever is on it; Android's data

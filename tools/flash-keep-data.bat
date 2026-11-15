@@ -4,6 +4,7 @@ rem Project Churro: update a Churro USB stick in place, keeping Android's data (
 rem Windows side of tools/flash-keep-data.sh: installs usbipd-win if missing, lets you pick a USB
 rem disk (never the system/boot disk), passes it through to WSL, checks it holds Googlebook OS
 rem (tools/updater/buildinfo.sh), asks for confirmation and runs flash-keep-data.sh.
+rem tools\grow-data.bat and tools\mount-partition.bat run this same part (FKD_ACTION).
 rem Usage: tools\flash-keep-data.bat [image]   (no image: pick a .img / .img.gz from out\)
 rem        set CHURRO_WSL=<distro> to use another WSL distro than Ubuntu.
 setlocal
@@ -22,7 +23,9 @@ try {
 $repo = (Resolve-Path (Join-Path $env:FKD_DIR '..')).Path
 $distro = 'Ubuntu'; if ($env:CHURRO_WSL) { $distro = $env:CHURRO_WSL }
 $grow = $env:FKD_ACTION -eq 'grow'   # tools\grow-data.bat: same disk picking, then grow-data.sh
-if ($grow) { $img = $null } elseif ($env:FKD_IMG) { $img = (Resolve-Path $env:FKD_IMG).Path } else {
+$mount = $env:FKD_ACTION -eq 'mount' # tools\mount-partition.bat: same disk picking, then mount one
+$mp = $null; $keep = $null
+if ($grow -or $mount) { $img = $null } elseif ($env:FKD_IMG) { $img = (Resolve-Path $env:FKD_IMG).Path } else {
   # pick an image in out\ (churro.sh writes a .img, a compressed copy is .img.gz), newest first
   $imgs = @(Get-ChildItem (Join-Path $repo 'out') -File | Where-Object { $_.Name -match '\.img(\.gz)?$' } | Sort-Object LastWriteTime -Descending)
   if ($imgs.Count -eq 0) { Fail "no .img / .img.gz in $repo\out (or pass an image: flash-keep-data.bat <image>)" }
@@ -34,7 +37,7 @@ if ($grow) { $img = $null } elseif ($env:FKD_IMG) { $img = (Resolve-Path $env:FK
   $i = 0; if (-not [int]::TryParse($p.Trim(), [ref]$i) -or $i -lt 1 -or $i -gt $imgs.Count) { Fail "no image number $p" }
   $img = $imgs[$i - 1].FullName
 }
-if (-not $grow -and -not (Test-Path $img)) { Fail "image not found: $img" }
+if ($img -and -not (Test-Path $img)) { Fail "image not found: $img" }
 
 # 1. usbipd-win (a terminal opened before installing it doesn't have it on PATH yet)
 if (-not (Get-Command usbipd -ErrorAction SilentlyContinue)) { $env:Path += ';C:\Program Files\usbipd-win' }
@@ -107,7 +110,60 @@ $before = WslUsbDisks
   $info = wsl.exe -d $distro -u root -- bash "$wrepo/tools/updater/buildinfo.sh" $sdev
   if ($LASTEXITCODE -ne 0 -or -not ($info -match '^FINGERPRINT=')) { Fail "$sdev doesn't hold Googlebook OS (buildinfo.sh found no build): not touching it" }
   Write-Host "`nOn the stick now:"; $info | Where-Object { $_ -match '^(MODEL|RELEASE|BUILD_ID|INCREMENTAL|FINGERPRINT)=' } | ForEach-Object { "  $_" } | Out-Host
-  if ($grow) {
+  if ($mount) {
+    # 5. mount one partition in WSL and show it in Explorer (until Enter)
+    $parts = @(
+      @('EFI-SYSTEM',    'boot files: GRUB menu, env.cfg (extra kernel args), kernel (read-write)'),
+      @('CHURRO-LOG',    'logs of the debug boot entries (read-write)'),
+      @('system_a',      'Android system (read-only)'),
+      @('system_ext_a',  'system_ext (read-only)'),
+      @('product_a',     'product: Google apps, build.prop (read-only)'),
+      @('vendor_a',      'vendor: HALs, init .rc files, SELinux policy, firmware (read-only)'),
+      @('vendor_dlkm_a', 'vendor kernel modules (read-only)'),
+      @('system_dlkm_a', 'GKI kernel modules (read-only)'),
+      @('userdata',      "Android's data (read-only; most names are encrypted)"))
+    $n = 0
+    $parts | ForEach-Object { $n++; [pscustomobject]@{ N = $n; Partition = $_[0]; Contents = $_[1] } } | Format-Table -AutoSize | Out-Host
+    $p = Read-Host 'Number of the partition (Enter = cancel)'
+    if (-not $p) { Fail 'cancelled' }
+    $i = 0; if (-not [int]::TryParse($p.Trim(), [ref]$i) -or $i -lt 1 -or $i -gt $parts.Count) { Fail "no partition number $p" }
+    $name = $parts[$i - 1][0]
+    $uid = "$(wsl.exe -d $distro -- id -u)".Trim()   # Explorer reaches WSL as the distro's default user
+    # args: <disk> <partition> <uid> <repo>. stdin script: LF only, and a trailing newline so the
+    # CRLF PowerShell appends lands on a line bash never reads (exit comes first)
+    $sh = @'
+set -eu
+dev=$1 name=$2 uid=$3 repo=$4 mp=/mnt/churro/$2
+part() { lsblk -lnpo PATH,PARTLABEL "$dev" | awk -v n="$1" '$2 == n {print $1; exit}'; }
+mkdir -p "$mp"
+if mountpoint -q "$mp"; then umount "$mp"; fi
+case $name in
+  EFI-SYSTEM|CHURRO-LOG)
+    d=$(part "$name"); [ -n "$d" ] || { echo "no $name partition on $dev" >&2; exit 1; }
+    mount -t vfat -o "uid=$uid,gid=$uid,umask=022" "$d" "$mp" ;;
+  userdata)
+    d=$(part userdata); [ -n "$d" ] || { echo "no userdata partition on $dev" >&2; exit 1; }
+    # noload: no journal replay, nothing written (Android formats it on first start)
+    mount -t ext4 -o ro,noload "$d" "$mp" || { echo "userdata didn't mount (never started: not formatted yet?)" >&2; exit 1; } ;;
+  *)
+    s=$(part super); [ -n "$s" ] || { echo "no super partition on $dev" >&2; exit 1; }
+    read -r off size < <(python3 "$repo/lib/lpinfo.py" "$s" "$name") || { echo "no $name in super" >&2; exit 1; }
+    modprobe erofs
+    mount -t erofs -o "ro,loop,offset=$off,sizelimit=$size" "$s" "$mp" ;;
+esac
+echo "$mp"
+exit 0
+'@
+    $mp = (($sh -replace "`r", '') + "`n") | wsl.exe -d $distro -u root -- bash -s -- $sdev $name $uid $wrepo
+    if ($LASTEXITCODE -ne 0) { $mp = $null; Fail "mounting $name failed (see above)" }
+    $mp = "$($mp | Select-Object -Last 1)".Trim()
+    # keeps the distro running while Explorer browses (an idle distro stops and loses the mount)
+    $keep = Start-Process wsl.exe -ArgumentList "-d $distro -- sleep infinity" -WindowStyle Hidden -PassThru
+    $win = "\\wsl$\$distro" + ($mp -replace '/', '\')
+    Write-Host "`n$name is mounted at $mp in WSL: $win"
+    Start-Process explorer.exe $win
+    Read-Host "`nPress Enter when done: it is unmounted and the stick goes back to Windows" | Out-Null
+  } elseif ($grow) {
     # 5. grow userdata: grow-data.sh's plan first (DRY=1), then the real run
     $plan = wsl.exe -d $distro -u root -- env DRY=1 bash "$wrepo/tools/grow-data.sh" $sdev
     if ($LASTEXITCODE -ne 0) { Fail 'grow-data.sh failed (see above)' }
@@ -136,6 +192,11 @@ $before = WslUsbDisks
 } catch {
   Write-Host "ERROR: $_" -ForegroundColor Red
 } finally {
+  if ($mp) {   # lazy if Explorer still has it open; the stick goes away right after anyway
+    wsl.exe -d $distro -u root -- sh -c "umount '$mp' 2>/dev/null || umount -l '$mp'; rmdir '$mp'"
+    Write-Host "$mp unmounted."
+  }
+  if ($keep) { Stop-Process -Id $keep.Id -ErrorAction SilentlyContinue }
   if ($attached) { usbipd detach --busid $busid | Out-Null; Write-Host "USB device $busid given back to Windows." }
 }
 Read-Host 'Press Enter to exit' | Out-Null
