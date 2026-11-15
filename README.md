@@ -1,5 +1,7 @@
 # Project Churro
 
+<p align="center"><img src="docs/logo/churro-logo.svg" alt="Project Churro logo" width="200"></p>
+
 Make **Googlebook OS** (Android 17 "android-desktop" / Aluminium) recovery images bootable and
 installable on generic x86_64 UEFI PCs, by *converting* Google's official image locally instead
 of redistributing a ported one (same idea as Project Croissant / chromefy for ChromeOS).
