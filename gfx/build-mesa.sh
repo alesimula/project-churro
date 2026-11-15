@@ -56,9 +56,13 @@ cd "mesa-$MESA_VER"
 # (mesa_clc, vtn_bindgen2) natively first - they need LLVM/Clang/libclc/SPIRV-LLVM-Translator.
 if [ ! -x "$WORK/host-tools/bin/mesa_clc" ]; then
   # SPIRV-Tools.pc: in spirv-tools up to Ubuntu 24.04, split out to spirv-tools-dev since 26.04
-  spvt=spirv-tools; apt-cache show spirv-tools-dev >/dev/null 2>&1 && spvt=spirv-tools-dev
-  apt-get install -y -qq llvm-18-dev libclang-18-dev libclc-18-dev libllvmspirvlib-18-dev clang-18 \
-    libdrm-dev libexpat1-dev zlib1g-dev "$spvt" >/dev/null
+  # Other distros (no apt-get): install the equivalents yourself (Arch: llvm clang libclc
+  # spirv-llvm-translator spirv-tools libdrm expat zlib)
+  if command -v apt-get >/dev/null; then
+    spvt=spirv-tools; apt-cache show spirv-tools-dev >/dev/null 2>&1 && spvt=spirv-tools-dev
+    apt-get install -y -qq llvm-18-dev libclang-18-dev libclc-18-dev libllvmspirvlib-18-dev clang-18 \
+      libdrm-dev libexpat1-dev zlib1g-dev "$spvt" >/dev/null
+  fi
   rm -rf build-host
   meson setup build-host --prefix="$WORK/host-tools" --buildtype release \
     -Dgallium-drivers= -Dvulkan-drivers= -Dplatforms= -Dglx=disabled -Degl=disabled -Dgbm=disabled \
@@ -84,8 +88,9 @@ sed -i "s#PKG_CONFIG_LIBDIR=[^']*#PKG_CONFIG_LIBDIR=$SYS/lib64/pkgconfig#" "$WOR
 # libelf for NVK (reads CUDA cubins): the small old libelf Mesa's own Android CI uses
 LIBELF=libelf-0.8.13
 if [ ! -f "$SYS/lib64/libelf.a" ]; then
-  (cd "$WORK" && rm -rf $LIBELF && curl -fsSL -o $LIBELF.tar.gz "https://fossies.org/linux/misc/old/$LIBELF.tar.gz" \
-   && echo "4136d7b4c04df68b686570afa26988ac  $LIBELF.tar.gz" | md5sum -c --quiet && tar -xzf $LIBELF.tar.gz && rm $LIBELF.tar.gz \
+  (cd "$WORK" && rm -rf $LIBELF \
+   && { [ -f $LIBELF.tar.gz ] || curl -fsSL -o $LIBELF.tar.gz "https://fossies.org/linux/misc/old/$LIBELF.tar.gz"; } \
+   && echo "4136d7b4c04df68b686570afa26988ac  $LIBELF.tar.gz" | md5sum -c --quiet && tar -xzf $LIBELF.tar.gz \
    && cd $LIBELF && autoreconf -fi >/dev/null 2>&1 \
    && CC=$TC/x86_64-linux-android$API-clang AR=$TC/llvm-ar RANLIB=$TC/llvm-ranlib \
         ./configure -q --host=x86_64-linux-gnu --disable-nls --disable-shared --prefix="$SYS" --libdir="$SYS/lib64" \
