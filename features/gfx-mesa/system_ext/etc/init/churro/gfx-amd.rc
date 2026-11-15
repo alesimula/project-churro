@@ -1,0 +1,10 @@
+# AMD GPUs driven by amdgpu (GCN 3 and newer): Google's own stack on Mesa's RADV instead of ANV -
+# GL through ANGLE on Vulkan, SurfaceFlinger + HWUI on Skia Vulkan, as on Intel (and as gbos-x86
+# runs it on a Ryzen). Buffers: minigbm's linear amdgpu backend (gfx/minigbm-patches).
+# Overlay planes off: drm_hwcomposer's planes on amdgpu are untested (gbos-x86 does the same).
+on early-init
+    setprop ro.hardware.egl angle
+    setprop ro.hardware.vulkan radeon
+    setprop ro.hwui.use_vulkan true
+    setprop debug.renderengine.vulkan true
+    setprop ro.vendor.hwc.use_overlay_planes false

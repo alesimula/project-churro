@@ -1,0 +1,169 @@
+--- a/dumb_driver.c	2026-11-15 14:15:37.321716610 +0100
++++ b/dumb_driver.c	2026-11-15 14:15:37.338142304 +0100
+@@ -82,3 +82,144 @@
+ #ifndef DRV_MEDIATEK
+ INIT_DUMB_DRIVER(mediatek)
+ #endif
++
++#ifndef DRV_AMDGPU
++/*
++ * Churro: amdgpu without Mesa's radeonsi DRI driver, which minigbm's own amdgpu backend needs
++ * (tiled layouts): linear GEM buffers, the layout gbos-x86 runs RADV and the display on. Render
++ * nodes refuse dumb buffers. Pitch exactly ALIGN(width * cpp, 256): what RADV computes for a
++ * linear image on GFX9+ (GFX10 refuses any other pitch) and what amdgpu's dumb buffers use. GPU
++ * buffers in VRAM, allowed to spill to GTT; CPU-only ones in GTT. USWC (write-combined GTT) as
++ * upstream minigbm sets it: without it an APU must migrate every framebuffer into its VRAM
++ * carve-out to scan it out. Only in the amd graphics mode (androidboot.churro.gfx=amd): on a
++ * hybrid machine the other GPU's mode must not end up with buffers from this render node.
++ */
++#include <string.h>
++#include <sys/mman.h>
++#include <xf86drm.h>
++#include <amdgpu_drm.h>
++
++/* render + scanout (as upstream amdgpu.c); no 24-bit RGB: its 256-pixel pitch rule doesn't fit
++ * the stride above */
++static const uint32_t amdgpu_render_formats[] = {
++	DRM_FORMAT_ARGB8888,	DRM_FORMAT_XRGB8888,	DRM_FORMAT_ABGR8888,	DRM_FORMAT_XBGR8888,
++	DRM_FORMAT_RGB565,	DRM_FORMAT_ABGR2101010, DRM_FORMAT_ARGB2101010, DRM_FORMAT_XBGR2101010,
++	DRM_FORMAT_XRGB2101010
++};
++
++static int amdgpu_linear_init(struct driver *drv)
++{
++	const char *gfx = drv_get_os_option("ro.boot.churro.gfx");
++
++	if (!gfx || strcmp(gfx, "amd"))
++		return -ENODEV;
++	drv_add_combinations(drv, amdgpu_render_formats, ARRAY_SIZE(amdgpu_render_formats),
++			     &LINEAR_METADATA, BO_USE_RENDER_MASK | BO_USE_SCANOUT);
++	drv_add_combination(drv, DRM_FORMAT_ABGR16161616F, &LINEAR_METADATA, BO_USE_RENDER_MASK);
++	drv_add_combinations(drv, texture_only_formats, ARRAY_SIZE(texture_only_formats),
++			     &LINEAR_METADATA, BO_USE_TEXTURE_MASK);
++	drv_add_combination(drv, DRM_FORMAT_P010, &LINEAR_METADATA,
++			    BO_USE_TEXTURE_MASK | BO_USE_HW_VIDEO_DECODER);
++	drv_modify_combination(drv, DRM_FORMAT_R8, &LINEAR_METADATA,
++			       BO_USE_HW_VIDEO_ENCODER | BO_USE_HW_VIDEO_DECODER |
++				   BO_USE_CAMERA_READ | BO_USE_CAMERA_WRITE |
++				   BO_USE_GPU_DATA_BUFFER | BO_USE_SENSOR_DIRECT_DATA);
++	drv_modify_combination(drv, DRM_FORMAT_NV12, &LINEAR_METADATA,
++			       BO_USE_HW_VIDEO_ENCODER | BO_USE_HW_VIDEO_DECODER |
++				   BO_USE_CAMERA_READ | BO_USE_CAMERA_WRITE);
++	drv_modify_combination(drv, DRM_FORMAT_NV21, &LINEAR_METADATA, BO_USE_HW_VIDEO_ENCODER);
++	return drv_modify_linear_combinations(drv);
++}
++
++static int amdgpu_linear_bo_create(struct bo *bo, uint32_t width, uint32_t height,
++				   uint32_t format, uint64_t use_flags)
++{
++	union drm_amdgpu_gem_create gem = { 0 };
++	uint32_t stride = ALIGN(drv_stride_from_format(format, width, 0), 256), align = 1;
++	int ret;
++
++	/* GPU users need every plane's pitch 256-aligned. Android's YV12 halves the Y pitch for
++	 * the chroma planes, which then isn't when Y/256 is odd: standard YVU420 there, as
++	 * upstream amdgpu.c does on GFX10+ (which refuses any larger pitch) */
++	if (use_flags & BO_USE_GPU_HW) {
++		align = 256;
++		if (format == DRM_FORMAT_YVU420_ANDROID && ((stride / 256) & 1))
++			format = DRM_FORMAT_YVU420;
++	}
++	/* video decoders write whole 16-line macroblock rows (1080 -> 1088), as upstream amdgpu.c */
++	if ((use_flags & (BO_USE_HW_VIDEO_DECODER | BO_USE_HW_VIDEO_ENCODER)) &&
++	    format != DRM_FORMAT_YVU420_ANDROID)
++		height = ALIGN(height, 16);
++	ret = drv_bo_from_format(bo, stride, align, height, format);
++	if (ret)
++		return ret;
++
++	gem.in.bo_size = ALIGN(bo->meta.total_size, 4096);
++	gem.in.alignment = 4096;
++	gem.in.domains = AMDGPU_GEM_DOMAIN_VRAM | AMDGPU_GEM_DOMAIN_GTT;
++	if ((use_flags & BO_USE_SW_MASK) &&
++	    !(use_flags & (BO_USE_SCANOUT | BO_USE_RENDERING | BO_USE_TEXTURE)))
++		gem.in.domains = AMDGPU_GEM_DOMAIN_GTT;
++	if (use_flags & BO_USE_SW_MASK)
++		gem.in.domain_flags |= AMDGPU_GEM_CREATE_CPU_ACCESS_REQUIRED;
++	if ((use_flags & BO_USE_SCANOUT) || !(use_flags & BO_USE_SW_READ_OFTEN))
++		gem.in.domain_flags |= AMDGPU_GEM_CREATE_CPU_GTT_USWC;
++
++	ret = drmCommandWriteRead(bo->drv->fd, DRM_AMDGPU_GEM_CREATE, &gem, sizeof(gem));
++	if (ret) {
++		drv_loge("DRM_AMDGPU_GEM_CREATE failed (%llu bytes, domains 0x%llx): %d\n",
++			 (unsigned long long)gem.in.bo_size, (unsigned long long)gem.in.domains, ret);
++		return ret;
++	}
++	bo->handle.u32 = gem.out.handle;
++	return 0;
++}
++
++static int amdgpu_linear_bo_create_with_modifiers(struct bo *bo, uint32_t width, uint32_t height,
++						  uint32_t format, const uint64_t *modifiers,
++						  uint32_t count)
++{
++	if (!drv_has_modifier(modifiers, count, DRM_FORMAT_MOD_LINEAR))
++		return -EINVAL;
++	return amdgpu_linear_bo_create(bo, width, height, format,
++				       BO_USE_SCANOUT | BO_USE_RENDERING);
++}
++
++static void *amdgpu_linear_bo_map(struct bo *bo, struct vma *vma, uint32_t map_flags)
++{
++	union drm_amdgpu_gem_mmap req = { 0 };
++
++	req.in.handle = bo->handle.u32;
++	if (drmCommandWriteRead(bo->drv->fd, DRM_AMDGPU_GEM_MMAP, &req, sizeof(req))) {
++		drv_loge("DRM_AMDGPU_GEM_MMAP failed: %d\n", errno);
++		return MAP_FAILED;
++	}
++	vma->length = bo->meta.total_size;
++	return mmap(NULL, vma->length, drv_get_prot(map_flags), MAP_SHARED, bo->drv->fd,
++		    req.out.addr_ptr);
++}
++
++/* CPU access: wait until the GPU is done with the buffer (absolute timeout; ~0 = forever) */
++static int amdgpu_linear_bo_invalidate(struct bo *bo, struct mapping *mapping)
++{
++	union drm_amdgpu_gem_wait_idle req = { 0 };
++
++	req.in.handle = bo->handle.u32;
++	req.in.timeout = ~0ULL;
++	return drmCommandWriteRead(bo->drv->fd, DRM_AMDGPU_GEM_WAIT_IDLE, &req, sizeof(req));
++}
++
++const struct backend backend_amdgpu = {
++	.name = "amdgpu",
++	.init = amdgpu_linear_init,
++	.bo_create = amdgpu_linear_bo_create,
++	.bo_create_with_modifiers = amdgpu_linear_bo_create_with_modifiers,
++	.bo_destroy = drv_gem_bo_destroy,
++	.bo_import = drv_prime_bo_import,
++	.bo_export = drv_prime_bo_export,
++	.bo_map = amdgpu_linear_bo_map,
++	.bo_unmap = drv_bo_munmap,
++	.bo_invalidate = amdgpu_linear_bo_invalidate,
++	.resolve_format_and_use_flags = drv_resolve_format_and_use_flags_helper,
++};
++#endif
+--- a/drv.c	2026-11-15 14:15:37.321716610 +0100
++++ b/drv.c	2026-11-15 14:15:37.338142304 +0100
+@@ -45,6 +45,9 @@
+ #endif
+ 
+ // Dumb / generic drivers
++#ifndef DRV_AMDGPU
++extern const struct backend backend_amdgpu; /* Churro: linear, dumb_driver.c */
++#endif
+ extern const struct backend backend_evdi;
+ extern const struct backend backend_marvell;
+ extern const struct backend backend_mediatek;
+@@ -62,9 +65,7 @@
+ extern const struct backend backend_mock;
+ 
+ static const struct backend *drv_backend_list[] = {
+-#ifdef DRV_AMDGPU
+ 	&backend_amdgpu,
+-#endif
+ #ifdef DRV_I915
+ 	&backend_i915,
+ #endif

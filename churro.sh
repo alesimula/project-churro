@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Project Churro - make a Googlebook OS recovery image bootable on generic UEFI PCs.
-# Usage: sudo ./churro.sh auto  <recovery.bin> <out.img> [--gfx auto|native|nouveau|mesa|soft] [--packs virt,gpu,storage,wifi]
+# Usage: sudo ./churro.sh auto  <recovery.bin> <out.img> [--gfx auto|native|amd|nouveau|mesa|soft] [--packs virt,gpu,storage,wifi]
 #                               [--stock-touchpad]
 #        sudo ./churro.sh build <recovery.bin> <out.img> [--kernel dir] [--modules <pack dir>]...
 #                               [--features a,b] [--boot-source external|internal]
@@ -122,6 +122,7 @@ cmd_build() {
     export CHURRO_KERNEL=$kdir   # for features adding our kernel's modules (gpu-nouveau)
     export CHURRO_XE_IDS=$W/xe-ids   # drivers-extra: GPU IDs the image's xe binds -> boot menu
     export CHURRO_HASVK_IDS=$W/hasvk-ids   # gfx-mesa: Intel Gen7-8 GPU IDs (Vulkan: hasvk) -> boot menu
+    export CHURRO_RADEON_IDS=$W/radeon-ids   # drivers-extra: AMD GPU IDs radeon.ko claims -> boot menu (not amd)
     # vendor_dlkm first: firmware-extra (a vendor feature) reads the module list from it
     for p in vendor_dlkm vendor system system_ext product odm; do
       mp=/$p; [ "$p" = system ] && mp=/   # system-as-root
@@ -271,7 +272,7 @@ cmd_install() {
   log "done. Reboot, pick the disk in the UEFI boot menu (Secure Boot off)."
 }
 
-# auto <in.bin> <out.img> [--gfx auto|native|nouveau|mesa|soft] [--kernel-profile generic]:
+# auto <in.bin> <out.img> [--gfx auto|native|amd|nouveau|mesa|soft] [--kernel-profile generic]:
 # prepare everything (tools/prepare.sh) and build with the recommended defaults.
 # --gfx auto (default): the boot menu picks the graphics stack from the GPUs it finds (esp.sh).
 cmd_auto() {
@@ -298,7 +299,7 @@ cmd_auto() {
 
 case ${1:-} in auto|build) deps_ensure ;; esac   # install only needs the tools cmd_install checks
 case ${1:-} in
-  auto) shift; [ $# -ge 2 ] || die "usage: churro.sh auto <in.bin> <out.img> [--gfx auto|native|nouveau|mesa|soft]"; cmd_auto "$@" ;;
+  auto) shift; [ $# -ge 2 ] || die "usage: churro.sh auto <in.bin> <out.img> [--gfx auto|native|amd|nouveau|mesa|soft]"; cmd_auto "$@" ;;
   build) shift; [ $# -ge 2 ] || die "usage: churro.sh build <in.bin> <out.img> [opts]"; cmd_build "$@" ;;
   install) shift; [ $# -eq 2 ] || die "usage: churro.sh install <churro.img> <disk, e.g. /dev/nvme0n1>"; cmd_install "$@" ;;
   *) sed -n '2,6p' "$0"; exit 1 ;;

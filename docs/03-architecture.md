@@ -388,7 +388,9 @@ files get a sibling's label or an explicit one.
   own build) by `gfx/build-minigbm.sh` with the NDK, plus `gfx/minigbm-patches/api<NN>/`. Google's build
   rejects every GPU missing from its ID tables; ours asks the xe kernel driver for the GPU's
   graphics IP version instead (any Intel Xe GPU works), and on nouveau allocates real buffers
-  (`NOUVEAU_GEM_NEW`, VRAM) instead of dumb buffers, which render nodes refuse. Google's allocator service, mapper and
+  (`NOUVEAU_GEM_NEW`, VRAM) instead of dumb buffers, which render nodes refuse. On amdgpu
+  (`amdgpu-linear.patch`, amd mode only) linear `AMDGPU_GEM_CREATE` buffers, pitch
+  ALIGN(width × cpp, 256): minigbm's own amdgpu backend needs radeonsi's DRI interface. Google's allocator service, mapper and
   gralloc0 module stay and load our libraries: they're linked against the image's own libc++
   (platform `std::__1` ABI) and the build refuses to install them unless every symbol the image's
   binaries take from Google's versions is present. Written in place (labels kept).
@@ -457,9 +459,15 @@ files get a sibling's label or an explicit one.
 * `gpu-nouveau` (default) — NVIDIA GPUs (nouveau.ko itself comes with drivers-extra):
   `nouveau.atomic=1` for drm_hwcomposer, and wildcard SELinux labels so apps can read any GPU's
   PCI ID files (Mesa's device enumeration). Details: docs/05.
-* `gfx-mesa` (default) — Mesa built with the NDK (`gfx/build-mesa.sh`: iris/crocus/nouveau/zink/
-  virgl/softpipe + NVK, hasvk/radv on request) and the boot-time stack selection
-  (`androidboot.churro.gfx`, set by GRUB from PCI: native / nouveau / mesa / soft).
+* `gfx-mesa` (default) — Mesa built with the NDK (`gfx/build-mesa.sh`: iris/crocus/nouveau/
+  radeonsi/zink/virgl/softpipe + NVK, hasvk, RADV) and the boot-time stack selection
+  (`androidboot.churro.gfx`, set by GRUB from PCI: native / amd / nouveau / mesa / soft).
+  `amd` (AMD GPUs amdgpu drives, GCN 3 and newer): Google's stack with RADV instead of ANV
+  (ANGLE on Vulkan, Skia Vulkan), `vulkan.radeon.so` reporting Vulkan 1.3/1.4 on Android
+  (`radv-android-api-version.patch`, as for hasvk), radeonsi only for its VA-API driver (camera
+  HAL, codecs). GRUB takes the first AMD PCI device, following up to two PCIe switch levels (RX
+  5000+), and leaves IDs radeon.ko claims (pre-GCN to GFX7, `CHURRO_RADEON_IDS` from
+  drivers-extra) on their old path.
 
 ### 5. Installer
 The recovery image already has the installed layout, so `churro.sh install <img> <disk>` (from

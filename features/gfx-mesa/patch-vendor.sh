@@ -20,10 +20,10 @@ mkdir -p "$V/lib64/egl"; setfattr -n security.selinux -v u:object_r:vendor_file:
 for f in "$L"/libEGL_mesa.so "$L"/libGLESv1_CM_mesa.so "$L"/libGLESv2_mesa.so; do
   [ -f "$f" ] && put "$f" "$V/lib64/egl/$(basename "$f")"; done
 # Vulkan drivers are big (~20 MB each): NVK (GL on NVIDIA Kepler+ is Zink on top of it), hasvk
-# (Intel Gen7-8: Ivy Bridge, Haswell, Broadwell; Google's camera HAL and Chrome need Vulkan) +
-# the requested ones (CHURRO_MESA_VULKAN="radeon")
+# (Intel Gen7-8: Ivy Bridge, Haswell, Broadwell; Google's camera HAL and Chrome need Vulkan),
+# RADV (AMD, the amd mode: ANGLE + Skia on it) + any requested ones (CHURRO_MESA_VULKAN)
 vks=()
-for vk in nouveau intel_hasvk ${CHURRO_MESA_VULKAN:-}; do
+for vk in nouveau intel_hasvk radeon ${CHURRO_MESA_VULKAN:-}; do
   [ -f "$L/libvulkan_$vk.so" ] && put "$L/libvulkan_$vk.so" "$V/lib64/hw/vulkan.$vk.so" && vks+=("$V/lib64/hw/vulkan.$vk.so")
 done
 # hasvk's GPUs for the boot menu (lib/esp.sh picks ro.hardware.vulkan by device ID): Mesa's own

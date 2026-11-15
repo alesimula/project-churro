@@ -104,6 +104,9 @@ cat "$W/dep" "$W/dep.new" > "$D/modules.dep"
     sed "s/^/alias /; s/\$/ $m/"; done < "$W/ours"
 } | awk '!seen[$0]++' > "$W/alias"
 cat "$W/alias" > "$D/modules.alias"
+# AMD GPUs radeon.ko claims (up to GFX7: amdgpu gives those only its legacy display path, which
+# drm_hwcomposer can't use) -> the boot menu keeps them off the amd mode (esp.sh)
+[ -z "${CHURRO_RADEON_IDS:-}" ] || sed -nE 's/^alias pci:v00001002d0000([0-9A-F]{4}).* radeon$/\1/p' "$D/modules.alias" | sort -u > "$CHURRO_RADEON_IDS"
 if [ -s "$R/modules.softdep" ] && [ -f "$D/modules.softdep" ]; then
   grep -F -f <(sed 's/\.ko$//; s/-/_/g; s/^/softdep /; s/$/ /' "$W/ours") "$R/modules.softdep" |
     cat "$D/modules.softdep" - | awk '!seen[$0]++' > "$W/sd" || true

@@ -2,7 +2,8 @@
 # Build Mesa for Android x86_64 with the NDK (no AOSP tree needed: -Dandroid-stub=true).
 # Gives Churro GPU support the Googlebook vendor image lacks:
 #   GL/GLES (ro.hardware.egl=mesa): iris (Intel Gen8+, e.g. Broadwell HD 5300), crocus (Gen4-7),
-#     nouveau (NVIDIA up to Ada), zink (GL on Vulkan: NVIDIA Kepler+ on NVK), virgl (QEMU
+#     nouveau (NVIDIA up to Ada), radeonsi (AMD, no LLVM: ACO; mainly for its VA-API driver),
+#     zink (GL on Vulkan: NVIDIA Kepler+ on NVK), virgl (QEMU
 #     virtio-gpu-gl), softpipe (software, any GPU)
 #   Vulkan (ro.hardware.vulkan=...): nouveau (NVK, NVIDIA Kepler+), intel_hasvk (Gen7/8), radeon (AMD)
 # NVK is partly Rust: rustc/cargo (with the x86_64-linux-android std, built panic=abort like all
@@ -81,6 +82,9 @@ if [ ! -f "$SYS/lib64/pkgconfig/libdrm.pc" ]; then
   sed -i "s#^prefix=.*#prefix=$SYS#" "$SYS"/lib64/pkgconfig/*.pc
 fi
 sed -i "s#PKG_CONFIG_LIBDIR=[^']*#PKG_CONFIG_LIBDIR=$SYS/lib64/pkgconfig#" "$WORK/cross-android-x86_64"
+# libdrm_amdgpu's handle_table_* clash with Mesa's util/u_handle_table once radeonsi links both into
+# libgallium_dri.so (duplicate handle_table_remove): rename libdrm's copies (idempotent)
+"$TC/llvm-objcopy" $(for f in insert remove lookup fini; do echo --redefine-sym handle_table_$f=drm_amdgpu_handle_table_$f; done) "$SYS/lib64/libdrm_amdgpu.a"
 # libelf for NVK (reads CUDA cubins): the small old libelf Mesa's own Android CI uses
 LIBELF=libelf-0.8.13
 if [ ! -f "$SYS/lib64/libelf.a" ]; then
@@ -108,7 +112,7 @@ rm -rf build-android
 meson setup build-android --cross-file ../cross-android-x86_64 \
   --libdir lib64 --buildtype release -Db_ndebug=true \
   -Dplatforms=android -Dplatform-sdk-version=$API -Dandroid-stub=true -Dandroid-libbacktrace=disabled \
-  -Dgallium-drivers=iris,crocus,nouveau,zink,virgl,softpipe -Dvulkan-drivers=nouveau,intel_hasvk,amd \
+  -Dgallium-drivers=iris,crocus,nouveau,radeonsi,zink,virgl,softpipe -Dvulkan-drivers=nouveau,intel_hasvk,amd \
   -Dgallium-va=true -Dva-libs-path=/vendor/lib64 \
   -Dllvm=disabled -Dgbm=disabled -Dglx=disabled -Degl=enabled -Dgles1=enabled -Dgles2=enabled \
   -Degl-lib-suffix=_mesa -Dgles-lib-suffix=_mesa \

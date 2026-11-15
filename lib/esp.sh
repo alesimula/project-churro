@@ -95,6 +95,25 @@ if [ \"\$igpu\" = \"8086\" ]; then if regexp '^0*($xere)\$' \"\$igpudev\"; then 
   # stolen-memory DPT upstream "drm/xe: Fix DPT allocation paths" removed). Display 14+ untouched.
   local d13="46a0|46a1|46a2|46a3|46a6|46a8|46aa|462a|4626|4628|46b0|46b1|46b2|46b3|46c0|46c1|46c2|46c3|46d0|46d1|46d2|46d3|46d4|a720|a721|a7a0|a7a1|a7a8|a7a9|a7aa|a7ab|a7ac|a7ad"
   d13="$d13|${d13^^}"
+  # AMD GPUs radeon.ko claims (CHURRO_RADEON_IDS, drivers-extra): pre-GCN up to GFX7, which keep
+  # today's path. Every other AMD display device -> gfx=amd (amdgpu + Mesa's RADV), unless an
+  # NVIDIA GPU was found: Ryzen desktops have an iGPU while the monitor is on the card (APU +
+  # NVIDIA laptops: the "AMD" boot entry). The GPU is the
+  # first AMD device, or behind up to two PCIe switch levels (RX 5000 and newer: the card's own
+  # upstream + downstream port come first; secondary bus = config byte 0x19). setpci prints
+  # lower-case hex. Missed: AM3 boards, where an ATI chipset device comes first.
+  local rre=none   # no list (no radeon.ko): every AMD display device is amd
+  [ -s "${CHURRO_RADEON_IDS:-}" ] && rre=$(tr 'A-F' 'a-f' < "$CHURRO_RADEON_IDS" | sort -u | paste -sd'|')
+  local rd='unset amdcls; setpci -s $amdpos -v amdven VENDOR_ID; setpci -s $amdpos -v amdcls CLASS_DEVICE; setpci -s $amdpos -v amddev DEVICE_ID'
+  local hop="if [ \"\$amdcls\" = 604 ]; then setpci -s \$amdpos -v amdbus 19.b; set amdpos=\"\$amdbus:00.0\"; $rd; fi"
+  local amdsel="set amdven=1002
+setpci -d 1002: -v amdcls CLASS_DEVICE
+setpci -d 1002: -v amddev DEVICE_ID
+setpci -d 1002: -v amdbus 19.b
+set amdpos=\"\$amdbus:00.0\"
+if [ \"\$amdcls\" = 604 ]; then $rd; fi
+$hop
+if [ \"\$amdven\" = 1002 ]; then if [ \"\$amdcls\" = 300 -o \"\$amdcls\" = 302 -o \"\$amdcls\" = 380 ]; then if regexp '^0*($rre)\$' \"\$amddev\"; then set amdold=1; elif [ \"\$gfx\" = soft ]; then set gfx=amd; fi; fi; fi"
   # features/disk-install: the installer runs instead of Android, on the firmware framebuffer
   # (nomodeset: a GPU driver would take the text console away; Google's xe has none), logged to
   # CHURRO-LOG like the debug entries. Not offered on an installed disk.
@@ -136,10 +155,12 @@ set dbg="console=tty0 console=ttyS1,115200 ignore_loglevel printk.devkmsg=on pan
 # comes first on the cmdline and wins (Android keeps the first value of a ro. property).
 # Intel iGPU (always at 00:02.0, hybrid laptops included) -> Googlebook's own stack (xe), or
 # Mesa on our i915 if xe doesn't know the GPU (pre-Gen12); else an NVIDIA GPU (display
-# controller class 0300/0302) -> nouveau; else software rendering.
+# controller class 0300/0302) -> nouveau; else an AMD GPU amdgpu drives (GCN 3 and newer) ->
+# amd; else software rendering.
 set gfx=soft
 setpci -d 10de: -v nvclass CLASS_DEVICE
 if [ "\$nvclass" = "300" -o "\$nvclass" = "302" -o "\$nvclass" = "0300" -o "\$nvclass" = "0302" ]; then set gfx=nouveau; fi
+$amdsel
 setpci -s 00:02.0 -v igpu VENDOR_ID
 if [ "\$igpu" = "8086" ]; then set gfx=native; fi
 $xesel
@@ -176,7 +197,11 @@ submenu "Graphics: other stacks" {
     linux (\$root)/churro/kernel \$base androidboot.churro.gfx=nouveau \$dbg \$extra_args
     initrd (\$root)/churro/initrd.img
   }
-  menuentry "Mesa (older Intel iris/crocus, AMD, virgl)" {
+  menuentry "AMD (amdgpu + RADV) - debug" {
+    linux (\$root)/churro/kernel \$base androidboot.churro.gfx=amd \$dbg \$extra_args
+    initrd (\$root)/churro/initrd.img
+  }
+  menuentry "Mesa (older Intel iris/crocus, virgl)" {
     linux (\$root)/churro/kernel \$base androidboot.churro.gfx=mesa \$extra_args \$vk
     initrd (\$root)/churro/initrd.img
   }
