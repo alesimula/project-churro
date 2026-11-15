@@ -557,7 +557,8 @@ Next steps (each needs hardware to test):
     first Polaris tester.
   - GRUB looks at the first AMD device only: a radeon-claimed dGPU listed first (e.g. Ryzen 2500U
     + Radeon 530) keeps the machine on software rendering.
-  - Mesa is built with its default `video-codecs` (no H.264/H.265 in VA-API).
+  - Hardware video (VA-API) is built with every codec, H.264/H.265 included
+    (`CHURRO_MESA_CODECS=all_free` to leave them out); whether apps use it on AMD is untested.
 - No GPU driver / unknown GPU: a fallback backend (vgem, or dumb buffers on simpledrm) tried
   only after every real GPU, and never by opening `card0` before hwcomposer (that would take DRM
   master away from it).

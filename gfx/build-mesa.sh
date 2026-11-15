@@ -6,6 +6,9 @@
 #     zink (GL on Vulkan: NVIDIA Kepler+ on NVK), virgl (QEMU
 #     virtio-gpu-gl), softpipe (software, any GPU)
 #   Vulkan (ro.hardware.vulkan=...): nouveau (NVK, NVIDIA Kepler+), intel_hasvk (Gen7/8), radeon (AMD)
+# Hardware video codecs (VA-API: radeonsi, nouveau): all, H.264/H.265 included (patent-encumbered:
+# Mesa's own default is all_free, but Churro images are never distributed, each user builds their
+# own). CHURRO_MESA_CODECS=all_free (or a list, e.g. vp9dec,av1dec) leaves them out.
 # NVK is partly Rust: rustc/cargo (with the x86_64-linux-android std, built panic=abort like all
 # Android Rust) and bindgen are the GKI kernel build's toolchain (prepare.sh passes them);
 # cbindgen is built once with that cargo.
@@ -113,7 +116,7 @@ meson setup build-android --cross-file ../cross-android-x86_64 \
   --libdir lib64 --buildtype release -Db_ndebug=true \
   -Dplatforms=android -Dplatform-sdk-version=$API -Dandroid-stub=true -Dandroid-libbacktrace=disabled \
   -Dgallium-drivers=iris,crocus,nouveau,radeonsi,zink,virgl,softpipe -Dvulkan-drivers=nouveau,intel_hasvk,amd \
-  -Dgallium-va=true -Dva-libs-path=/vendor/lib64 \
+  -Dgallium-va=true -Dva-libs-path=/vendor/lib64 -Dvideo-codecs=${CHURRO_MESA_CODECS:-all} \
   -Dllvm=disabled -Dgbm=disabled -Dglx=disabled -Degl=enabled -Dgles1=enabled -Dgles2=enabled \
   -Degl-lib-suffix=_mesa -Dgles-lib-suffix=_mesa \
   -Dvalgrind=disabled -Dlibunwind=disabled -Dzstd=disabled -Dmesa-clc=system -Dprecomp-compiler=system \

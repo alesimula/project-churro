@@ -102,7 +102,7 @@ bash "$HERE/tools/make-pack.sh" "$MD" "$P/wifi" cfg80211 mac80211 ath9k
 # --- 4. Mesa (rebuilt when its build script or patches change; NVK's Rust parts use the
 #     kernel's Android Rust toolchain + bindgen) ---
 MP=$(version_dir "$HERE/gfx/mesa-patches" "${MESA_VER%.*}" "${MESA_VER##*.}")   # the folder build-mesa.sh uses
-MH=$({ cat "$HERE/gfx/build-mesa.sh" "$MP"/*.patch 2>/dev/null; echo "$MESA_VER $LIBDRM_VER $NDK_VER"; } | md5sum | cut -c1-8)
+MH=$({ cat "$HERE/gfx/build-mesa.sh" "$MP"/*.patch 2>/dev/null; echo "$MESA_VER $LIBDRM_VER $NDK_VER ${CHURRO_MESA_CODECS:-all}"; } | md5sum | cut -c1-8)
 if [ ! -f "$C/mesa/.built-$MH" ]; then
   CHURRO_RUST=$S/rust CHURRO_BINDGEN=$S/bin CHURRO_CLANG=$S/clang bash "$HERE/gfx/build-mesa.sh" "$C/mesa"
   rm -f "$C"/mesa/.built-*; touch "$C/mesa/.built-$MH"
