@@ -228,6 +228,10 @@ EOF
   vcmd="$vcmd efi_pstore.pstore_disable=1 iommu.passthrough=1"
   log "kernel cmdline: flash read-only, no TPM, no UEFI crash dumps, IOMMU passthrough, blacklisted: $blk"
 
+  # new disk + partition GUIDs for each build: Google's recovery image has fixed ones, so every
+  # image (and every disk written from one) would share them, and GRUB and Android find their disk
+  # by the ESP's. esp_build below writes this build's into GRUB.
+  sgdisk -G "$LOOP" >/dev/null; blockdev --rereadpt "$LOOP" 2>/dev/null || true; udevadm settle 2>/dev/null || sleep 1
   log "populating EFI-SYSTEM"
   # churro/build.txt: Google's build + when Churro built this (disk-install: update old -> new)
   { echo "$binfo"; echo "CHURRO_BUILT=$(date -u +%Y-%m-%dT%H:%MZ)"; } > "$W/build.txt"

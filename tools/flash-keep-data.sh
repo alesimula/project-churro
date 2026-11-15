@@ -10,6 +10,7 @@ set -euo pipefail
 IMG=$1 DEV=$2
 KEEP='(userdata|metadata|desktop_security_.*|frp_persist|CHURRO-LOG)'
 die() { echo "flash-keep-data: $*" >&2; exit 1; }
+. "$(dirname "$0")/../lib/esp.sh"   # esp_set_id
 [ -f "$IMG" ] || die "no image $IMG"
 [ -b "$DEV" ] || die "$DEV is not a block device"
 case $IMG in *.gz) rd() { gzip -dc "$IMG"; } ;; *) rd() { cat "$IMG"; } ;; esac
@@ -53,21 +54,27 @@ grep -vE " $KEEP$" "$T/img" | while read -r s n name; do
   pos=$((s + n))
 done
 sync
-# CHURRO-LOG keeps its logs but gets the new GRUB from the ESP just written (lib/esp.sh: firmware
-# boot menus list it before the ESP). Best effort: the update itself is done.
+# The ESP just written carries the image's ID in its GRUB (each build has its own GUIDs) while
+# the stick keeps its partition table: put the stick's own ESP ID in (lib/esp.sh esp_set_id).
+# CHURRO-LOG keeps its logs but gets that GRUB (lib/esp.sh: firmware boot menus list it before
+# the ESP). Best effort: the update itself is done.
 esp=$(awk '$3 == "EFI-SYSTEM" {print $1, $2}' "$T/img"); lg=$(awk '$3 == "CHURRO-LOG" {print $1, $2}' "$T/dev")
-if [ -n "$esp" ] && [ -n "$lg" ]; then
+espn=$(sgdisk -p "$DEV" | awk '$NF == "EFI-SYSTEM" {print $1; exit}')
+uuid=$(sgdisk -i "${espn:-0}" "$DEV" 2>/dev/null | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f)
+if [ -n "$esp" ]; then
   E=$(mktemp -d) L=$(mktemp -d)
-  read -r es en <<< "$esp"; read -r ls_ lnn <<< "$lg"
+  read -r es en <<< "$esp"
   note="note: CHURRO-LOG's boot loader not updated (its firmware boot entry may do nothing)"
-  if mount -o ro,offset=$((es * 512)),sizelimit=$((en * 512)) "$DEV" "$E"; then
-    if mount -o offset=$((ls_ * 512)),sizelimit=$((lnn * 512)) "$DEV" "$L"; then
+  if mount -o offset=$((es * 512)),sizelimit=$((en * 512)) "$DEV" "$E"; then
+    esp_set_id "$E" "$uuid" || echo "note: GRUB keeps the image's disk ID (its fallback search still finds this disk)"
+    if [ -z "$lg" ]; then :
+    elif read -r ls_ lnn <<< "$lg" && mount -o offset=$((ls_ * 512)),sizelimit=$((lnn * 512)) "$DEV" "$L"; then
       mkdir -p "$L/EFI/BOOT" && cp "$E/EFI/BOOT/BOOTX64.EFI" "$L/EFI/BOOT/" && echo ">> CHURRO-LOG: boot loader updated" ||
         echo "$note"
       umount "$L"
     else echo "$note"; fi
     umount "$E"
-  else echo "$note"; fi
+  else echo "note: the EFI partition can't be opened: GRUB keeps the image's disk ID; $note"; fi
   rmdir "$E" "$L"
 fi
 # the copy went through a loop mount of $DEV: its data sits in $DEV's cache until this, and the

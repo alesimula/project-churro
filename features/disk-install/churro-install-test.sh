@@ -14,7 +14,7 @@ esp() { mkfs.vfat "$1" >/dev/null; mount "$1" m; mkdir -p m/churro m/EFI/BOOT
   printf 'BUILD_ID=B%s\nINCREMENTAL=%s\nCHURRO_BUILT=2026-11-10\n' "$3" "$3" > m/churro/build.txt; umount m; }
 # run <mode> <candidate disks> <typed lines...>: output in out.txt, exit status returned
 run() { local mode=$1 disks=$2; shift 2
-  printf '%s\n' "$@" | PATH=$W/bin:$PATH CHURRO_INSTALL_SRC=$src CHURRO_INSTALL_DISKS="$disks" CHURRO_INSTALL_MINDATA=64 \
+  printf '%s\n' "$@" | PATH=$W/bin:$PATH CHURRO_INSTALL_SRC=$src CHURRO_INSTALL_DISKS="$disks" CHURRO_INSTALL_MINDATA=64 CHURRO_INSTALL_USB="${USB:-}" \
     ${SH:-sh} "$S" $mode > out.txt 2>&1; }
 ok() { echo "ok $1"; }; fail() { echo "FAIL $1"; cat out.txt; exit 1; }
 sum() { sha256sum "$1" | cut -c1-16; }
@@ -77,4 +77,14 @@ run update $dst 1 && false || { grep -q "newer Googlebook OS" out.txt && [ "$(su
 mount ${d}p2 m
 run update $dst "" && grep -q "in use" out.txt && ok "a mounted disk isn't offered" || fail inuse
 umount m
+# a twin: a disk written 1:1 from the stick's image (same IDs): which one runs is ambiguous
+dd if=src.img of=twin.img bs=1M status=none; loop twin.img; twin=$R; tw=/dev/$twin; tsum=$(sum twin.img) ssum=$(sum src.img)
+run update $twin && false || { grep -q "can't tell which one" out.txt && [ "$(sum twin.img)" = "$tsum" ] && ok "twin, neither disk USB: refused" || fail "twin refused"; }
+USB=$src run update $twin "" && grep -q Cancelled out.txt && [ "$(sum twin.img)" = "$tsum" ] && ok "twin: Enter changes nothing" || fail "twin cancel"
+USB=$src run update $twin YES "" && grep -q "has the same IDs" out.txt || fail "twin fix"
+espid() { sgdisk -i 12 $1 | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f; }
+[ "$(espid $tw)" != "$(espid $s)" ] && [ "$(sum src.img)" = "$ssum" ] || fail "twin: IDs not changed, or the stick touched"
+mount -o ro ${tw}p12 m; grep -q "CHURRO-ESPID:$(espid $tw) end" m/EFI/BOOT/BOOTX64.EFI || fail "twin: its GRUB has the old ID"; umount m
+mount -o ro ${tw}p2 m; grep -q "CHURRO-ESPID:$(espid $tw) end" m/EFI/BOOT/BOOTX64.EFI || fail "twin: CHURRO-LOG's GRUB"; umount m
+ok "twin: new IDs + its GRUB after YES, the stick untouched"
 echo "all passed (${SH:-sh})"

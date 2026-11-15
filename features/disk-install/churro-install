@@ -12,8 +12,8 @@
 # update: only disks with the stick's layout (userdata may be bigger); everything rewritten
 #   except that state and the logs, like tools/flash-keep-data.sh.
 # mksh arithmetic is 32-bit: sector counts of whole disks only go through awk or string tests.
-# Self-check: churro-install-test.sh (CHURRO_INSTALL_SRC / _DISKS / _MINDATA replace the running
-# disk, the disks to offer and the minimum userdata size in MiB).
+# Self-check: churro-install-test.sh (CHURRO_INSTALL_SRC / _DISKS / _MINDATA / _USB replace the
+# running disk, the disks to offer, the minimum userdata size in MiB and the disks taken as USB).
 mode=${1:-$(getprop ro.boot.churro.install)}
 trap '' INT QUIT TSTP   # a stray Ctrl-C must not leave a half-written disk
 mindata=${CHURRO_INSTALL_MINDATA:-12288}   # Android + Google apps need room on first boot
@@ -78,6 +78,17 @@ why_not() {  # why disk $1 can't be the target; nothing = it can
 run() {  # run <what failed> <command...>: a failed write ends the install, with the tool's message
   w=$1; shift; "$@" > $T/out 2>&1 || { cat $T/out; die "$w"; }
 }
+# write disk $1's ESP UUID into its GRUB (lib/esp.sh esp_set_id: old firmware gives GRUB no
+# $cmdpath) and CHURRO-LOG's copy of it (firmware menus list that one); $1's ESP is on $T/mnt
+grub_id() {
+  espid=$(sgdisk --info=$espn "$(node $1)" 2>/dev/null | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f)
+  off=$(cat $T/mnt/churro/espid.off 2>/dev/null)
+  if [ -n "$off" ] && [ ${#espid} = 36 ]; then
+    printf %s "$espid" | run "can't write the disk's ID into GRUB" dd of=$T/mnt/EFI/BOOT/BOOTX64.EFI bs=1 seek=$off conv=notrunc
+  else say "note: older stick, GRUB may boot another Churro disk plugged in"; fi
+  [ -n "$logn" ] && mount -t vfat "$(part $1 $logn)" $T/log 2>/dev/null &&   # best effort
+    { mkdir -p $T/log/EFI/BOOT && cp $T/mnt/EFI/BOOT/BOOTX64.EFI $T/log/EFI/BOOT/; umount $T/log; }
+}
 copy() {  # copy <n> <name> <sectors>: partition n, stick -> target, 256 MiB at a time
   a=$(part $src $1) b=$(part $t $1) blocks=$(($3 / 8192)) i=0
   while [ $i -lt $blocks ]; do
@@ -97,11 +108,45 @@ if [ -z "$src" ]; then   # the disk of the running system = where Android found 
   p=$(readlink -f /dev/block/by-name/super); p=$(readlink -f /sys/class/block/${p##*/}); p=${p%/*}; src=${p##*/}
 fi
 [ -b "$(node "$src")" ] || die "can't find the disk Churro was started from"
-table $src > $T/tab; slayout=$(layout $src)
-set -- $(grep ' userdata$' $T/tab); un=$1 us=$2
-set -- $(grep ' EFI-SYSTEM$' $T/tab); espn=$1
-set -- $(grep ' CHURRO-LOG$' $T/tab); logn=$1
-[ -n "$us" ] && [ -n "$espn" ] || die "can't read the partition table of the disk Churro runs from ($src)"
+readsrc() {
+  table $src > $T/tab; slayout=$(layout $src)
+  set -- $(grep ' userdata$' $T/tab); un=$1 us=$2
+  set -- $(grep ' EFI-SYSTEM$' $T/tab); espn=$1
+  set -- $(grep ' CHURRO-LOG$' $T/tab); logn=$1
+  [ -n "$us" ] && [ -n "$espn" ] || die "can't read the partition table of the disk Churro runs from ($src)"
+}
+readsrc
+# A twin: another disk with this disk's ESP ID, written 1:1 from the same image (dd, Etcher, an
+# old churro.sh install). GRUB and Android find their disk by that ID, so with both plugged in
+# either may have been taken: "the disk Churro runs from" can't be trusted. The stick is the USB
+# one; the other gets new IDs (after a YES: it's a disk nobody picked). Both USB or both internal:
+# no safe guess.
+espuuid() { sgdisk --info=$espn "$(node $1)" 2>/dev/null | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f; }
+usb() { case " $CHURRO_INSTALL_USB " in *" $1 "*) return 0 ;; esac; readlink -f /sys/block/$1 2>/dev/null | grep -q /usb; }
+sid=$(espuuid $src)
+for d in $(disks); do
+  [ $d != "$src" ] && [ -n "$sid" ] && [ "$(espuuid $d)" = "$sid" ] || continue
+  if usb $src && ! usb $d; then stick=$src o=$d; elif usb $d && ! usb $src; then stick=$d o=$src
+  else die "$(model $src) and $(model $d) have the same IDs (one was written 1:1 from the other's image), and Churro can't tell which one it runs from. Unplug one of them, or give one new IDs on a PC (sgdisk -G), and start again."; fi
+  printf '
+%s
+has the same IDs as the stick, %s:
+it was written 1:1 from a Churro image (dd, Etcher or an old churro.sh install). While both are
+plugged in, Churro can'"'"'t tell them apart.
+
+Churro can give %s new IDs. Its files and Android'"'"'s data stay as they are; only the
+partition IDs change. (If the PC then doesn'"'"'t start that disk by itself, pick it once in the
+firmware'"'"'s boot menu.)
+Type YES to do that and go on (Enter = power off): ' "$(model $o)" "$(model $stick)" "$o"
+  read -r a; case $a in [Yy][Ee][Ss]|[Zz][Ee][Ss]) ;; *) finish "Cancelled: nothing was changed." ;; esac
+  run "can't give $o new IDs" sgdisk --randomize-guids "$(node $o)"
+  run "can't open the EFI partition of $o" mount -t vfat "$(part $o $espn)" $T/mnt
+  grub_id $o; umount $T/mnt
+  say "$o: new IDs (it had the stick's)"
+  # Android's partitions came from that disk: it's busy until a restart (then the stick's are used)
+  in_use $o && finish "$o has new IDs. Start the installer again from the stick: this time Churro will know which disk is which."
+  src=$stick; readsrc; break
+done
 while read -r n s e name <&3; do   # userdata must be last: it's re-created up to the end of the disk
   [ $s -le $us ] || die "userdata isn't the last partition of $src (not written by Churro?)"
 done 3< $T/tab
@@ -166,15 +211,7 @@ run "can't open the EFI partition of the target" mount -t vfat "$(part $t $espn)
 run "can't set the boot source" sed -i 's/^set boot_source=.*/set boot_source=internal/' $T/mnt/churro/env.cfg
 # an install copied 1:1 from a stick (old churro.sh install) has the stick's IDs: give it its own
 [ "$mode" = new ] || [ "$(guid $t)" != "$(guid $src)" ] || sgdisk --randomize-guids "$(node $t)" > /dev/null 2>&1
-# this disk's ESP UUID into its GRUB (lib/esp.sh esp_set_id): old firmware gives GRUB no $cmdpath
-espid=$(sgdisk --info=$espn "$(node $t)" 2>/dev/null | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f)
-off=$(cat $T/mnt/churro/espid.off 2>/dev/null)
-if [ -n "$off" ] && [ ${#espid} = 36 ]; then
-  printf %s "$espid" | run "can't write the disk's ID into GRUB" dd of=$T/mnt/EFI/BOOT/BOOTX64.EFI bs=1 seek=$off conv=notrunc
-else say "note: older stick, GRUB may boot another Churro disk plugged in"; fi
-# CHURRO-LOG (logs kept on update) gets this GRUB (lib/esp.sh: firmware menus list it); best effort
-[ -n "$logn" ] && mount -t vfat "$(part $t $logn)" $T/log 2>/dev/null &&
-  { mkdir -p $T/log/EFI/BOOT && cp $T/mnt/EFI/BOOT/BOOTX64.EFI $T/log/EFI/BOOT/; umount $T/log; }
+grub_id $t   # CHURRO-LOG's copy too (logs kept on update)
 umount $T/mnt
 finish "Done. After the power off, unplug the disk Churro was running from (the stick) and start
 the PC: if it doesn't start Churro by itself, pick the internal disk in the firmware's boot

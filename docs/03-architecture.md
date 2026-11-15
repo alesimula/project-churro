@@ -28,6 +28,9 @@ the kernel cmdline: `androidboot.boot_part_uuid` (lets first-stage init find `su
 disk we booted from) and `androidboot.boot_source=external|internal`. GRUB finds its own disk's
 menu by the ESP UUID written into each disk's `BOOTX64.EFI` (`esp_set_id` in `lib/esp.sh`; old
 firmware leaves `$cmdpath` empty), else by `$cmdpath`, else the first disk with the menu.
+Every build gets its own disk + partition GUIDs (`sgdisk -G` before `esp_build`: Google's
+recovery image has fixed ones); `flash-keep-data` keeps the stick's GPT and writes the stick's own
+ESP UUID into the new GRUB.
 
 ### 2. Kernel: stock GKI or Churro kernel
 * **Stock GKI** (`boot_a`): fine for Intel Gen12+ (the image's own xe/iwlwifi/SOF modules) and for
@@ -296,6 +299,12 @@ files get a sibling's label or an explicit one.
     show "unknown version"), refuses a Google build older than the installed one; rewrites
     everything except Android's state and CHURRO-LOG (its GRUB copy refreshed), like
     flash-keep-data. An install with the stick's GUIDs (old `churro.sh install`) gets its own.
+  - **Twins**: before anything else, a disk with the running disk's ESP UUID (written 1:1 from
+    the same image: `dd`, Etcher, an old `churro.sh install`) makes "the disk Churro runs from"
+    ambiguous (GRUB and Android may have taken either). The USB one is the stick; after a YES
+    the other gets new GUIDs and its ID in GRUB, then the install goes on from the stick (or asks
+    for a restart if Android's partitions came from the other disk). Both USB or both internal:
+    refused with instructions.
 
   SELinux: its own domain `churro_install`, entered only by init executing that file, and
   **permissive** (it partitions whole disks, mounts ESPs, powers off; the rest of the system

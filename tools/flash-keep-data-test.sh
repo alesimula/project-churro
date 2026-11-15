@@ -9,7 +9,7 @@ printf 'label: gpt\nstart=2048, size=8192, name="EFI-SYSTEM"\nstart=10240, size=
 fill() { # fill <file> <tag>: every partition gets "<tag>-<name>" repeated
   sfdisk -d $1 | sed -n 's/.*start= *\([0-9]*\), size= *\([0-9]*\),.*name="\([^"]*\)".*/\1 \2 \3/p' | while read s n name; do
     yes "$2-$name" | head -c $((n*512)) | dd of=$1 bs=512 seek=$s conv=notrunc status=none; done; }
-cp new.img stick.img; fill stick.img OLD; fill new.img NEW
+cp new.img stick.img; sgdisk -G stick.img >/dev/null; fill stick.img OLD; fill new.img NEW   # a stick has its own GUIDs
 gzip -k -1 new.img
 L=$(losetup -f --show stick.img)
 for img in new.img new.img.gz; do
@@ -24,4 +24,12 @@ done
 truncate -s 32M other.img; printf 'label: gpt\nstart=2048, size=8192, name="x"\n' | sfdisk -q other.img
 L2=$(losetup -f --show other.img); echo n | bash "$S" new.img $L 2>&1 | tail -1   # a "no" writes nothing
 bash "$S" new.img $L2 2>&1 | tail -1; losetup -d $L2
+# the ESP's GRUB gets the stick's own ESP ID, not the image's (every build has its own GUIDs)
+N=$(losetup -fP --show new.img); mkfs.vfat ${N}p1 >/dev/null; mkdir m; mount ${N}p1 m; mkdir -p m/churro m/EFI/BOOT
+printf 'GRUB CHURRO-ESPID:%036d end' 0 > m/EFI/BOOT/BOOTX64.EFI; echo 18 > m/churro/espid.off; umount m; losetup -d $N
+bash "$S" new.img $L --yes > out.txt 2>&1 || { cat out.txt; exit 1; }
+id=$(sgdisk -i 1 $L | sed -n 's/^Partition unique GUID: //p' | tr A-F a-f)
+mount -o ro,offset=$((2048 * 512)),sizelimit=$((8192 * 512)) $L m
+grep -q "CHURRO-ESPID:$id end" m/EFI/BOOT/BOOTX64.EFI && echo "ok the ESP's GRUB gets the stick's own ID" || { echo "FAIL ESP ID"; cat out.txt; umount m; losetup -d $L; exit 1; }
+umount m
 losetup -d $L; rm -rf $W
