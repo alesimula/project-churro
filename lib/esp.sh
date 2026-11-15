@@ -160,13 +160,24 @@ smbios --type 1 --get-string 5 --set product
 # Google Pixel Slate (Nocturne, Kaby/Amber Lake-Y; docs/05 "Machines tried"):
 # - hid_google_hammer (detachable keyboard): the machine hard-resets ~0.1 s after it loads,
 #   13-15 s into every boot, nothing logged. Blocked together with the ChromeOS EC drivers.
-# - audio only works on the AVS driver (dsp_driver=4; the DSP firmware in linux-firmware is
-#   older than AVS expects; obsolete_card_names keeps the card names the UCM/config match)
 # - AVF on plain KVM (pKVM stays off): non-protected VMs, for the Linux Terminal app
+# (its audio: the Chromebook AVS rule below)
 if regexp '^[Nn]octurne\$' "\$product"; then
   set qblk=",hid_google_hammer,cros_ec,cros_ec_lpcs,cros_usbpd_notify"
-  set qargs="snd_intel_dspcfg.dsp_driver=4 snd_soc_avs.ignore_fw_version=1 snd_soc_avs.obsolete_card_names=1 androidboot.hypervisor.vm.supported=1 androidboot.hypervisor.protected_vm.supported=0"
+  set qargs="androidboot.hypervisor.vm.supported=1 androidboot.hypervisor.protected_vm.supported=0"
 fi
+# Skylake/Kaby Lake/Apollo Lake Chromebooks (SMBIOS manufacturer "Google", audio DSP 8086:9d70,
+# 9d71 or 5a98: the kernel's own Chromebook table, intel-dsp-config.c): speakers and mics hang off
+# the DSP, which only Intel's AVS driver runs here (SOF has no support for these boards). The DSP
+# firmware in linux-firmware is older than AVS expects; obsolete_card_names keeps the card names
+# audio-generic's configs (avs_<machine driver>) match. Later Chromebooks are SOF: not touched.
+set vendor=""
+smbios --type 1 --get-string 4 --set vendor
+set avsdsp=""
+for d in 9d70 9d71 5a98; do set x=""; setpci -d 8086:\$d -v x VENDOR_ID; if [ -n "\$x" ]; then set avsdsp=\$d; fi; done
+if regexp 'Google' "\$vendor"; then if [ -n "\$avsdsp" ]; then
+  set qargs="\$qargs snd_intel_dspcfg.dsp_driver=4 snd_soc_avs.ignore_fw_version=1 snd_soc_avs.obsolete_card_names=1"
+fi; fi
 set vcmd="$vq"
 
 set base="\$vcmd \$qargs androidboot.boot_part_uuid=\$puuid androidboot.boot_source=\$boot_source"
