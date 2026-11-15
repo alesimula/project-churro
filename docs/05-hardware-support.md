@@ -285,6 +285,20 @@ device ID, `mesa` (our i915) if not; else an NVIDIA display controller → `nouv
 The ID list comes from `xe.ko` at build time (drivers-extra → `CHURRO_XE_IDS` → a `regexp` in
 grub.cfg); without it every Intel iGPU gets `native`. A GRUB menu entry or an explicit `--gfx` wins.
 
+**Display-13 iGPUs boot with `xe.enable_dpt=0`** (Alder Lake-P/U, Alder Lake-N/Twin Lake, Raptor
+Lake-P/U: the 33 IDs of `INTEL_ADLP/ADLN/RPLP/RPLU_IDS`, matched in grub.cfg like the xe list).
+Google's `xe` faults on tiled framebuffers scanned out through the display page table
+(`[PLANE:33:plane 1A] fault (CTL=0x94101000, SURF=…, SURFLIVE=…)`), and the screen goes black at
+the login screen, unlock or a theme change until the lid is closed and opened. Seen on an HP
+ProBook 440 G9 (46b3), fixed there by the flag. The same fault is reported on upstream `xe` for
+RPL-U and ADL-P NUCs, gone with 7.2. Probable cause: DPTs allocated from stolen memory, which
+upstream "drm/xe: Fix DPT allocation paths" removed (7.2, stable 6.18.47). Without DPT, tiled
+framebuffers go straight into the GGTT, as on Tiger Lake. Display 14+ (MTL, ARL, LNL, PTL) is left
+alone: no reports there, and LNL/PTL have no DPT-disable bit. The flag comes before `extra_args`,
+so `xe.enable_dpt=1` there turns DPT back on. The parameter is module-wide (a hybrid laptop's
+Arc DG2 loses DPT too; untested) and marked unsafe: dmesg shows `Setting dangerous option
+enable_dpt - tainting kernel` on these machines.
+
 **Why i915 is safe next to xe now** (it caused the MSI regression as a first-stage pack, docs/02):
 that pack loaded on every machine, claimed Gen12+ GPUs before `xe` (i915 lists 109 of the 139 IDs
 `xe` binds) and brought its own `drm_display_helper`, which lacks the vendor backports `xe` needs

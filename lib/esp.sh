@@ -90,6 +90,11 @@ if [ \"\$igpu\" = \"8086\" ]; then if regexp '^0*($xere)\$' \"\$igpudev\"; then 
     local hre; hre=$({ tr 'A-F' 'a-f' < "$CHURRO_HASVK_IDS"; tr 'a-f' 'A-F' < "$CHURRO_HASVK_IDS"; } | sort -u | paste -sd'|')
     vksel="if [ \"\$gfx\" = mesa ]; then if regexp '^0*($hre)\$' \"\$igpudev\"; then set vk=intel_hasvk; else set vk=intel; fi; set vk=\"androidboot.churro.vulkan=\$vk\"; fi"
   fi
+  # Display-13 iGPUs (ADL-P, ADL-N/Twin Lake, RPL-P/U; IDs from the kernel's pciids.h): Google's
+  # xe faults on DPT-mapped (tiled) scanout, black screen (HP ProBook 440 G9, 46b3; likely the
+  # stolen-memory DPT upstream "drm/xe: Fix DPT allocation paths" removed). Display 14+ untouched.
+  local d13="46a0|46a1|46a2|46a3|46a6|46a8|46aa|462a|4626|4628|46b0|46b1|46b2|46b3|46c0|46c1|46c2|46c3|46d0|46d1|46d2|46d3|46d4|a720|a721|a7a0|a7a1|a7a8|a7a9|a7aa|a7ab|a7ac|a7ad"
+  d13="$d13|${d13^^}"
   # features/disk-install: the installer runs instead of Android, on the firmware framebuffer
   # (nomodeset: a GPU driver would take the text console away; Google's xe has none), logged to
   # CHURRO-LOG like the debug entries. Not offered on an installed disk.
@@ -140,6 +145,9 @@ if [ "\$igpu" = "8086" ]; then set gfx=native; fi
 $xesel
 set vk=""
 $vksel
+# before \$extra_args in every entry, so xe.enable_dpt=1 there switches DPT back on (later wins)
+setpci -s 00:02.0 -v igpudev DEVICE_ID
+if [ "\$igpu" = "8086" ]; then if regexp '^0*($d13)\$' "\$igpudev"; then set base="\$base xe.enable_dpt=0"; fi; fi
 set gfx="androidboot.churro.gfx=\$gfx \$vk"
 # A submenu opens a new GRUB context that only sees exported variables: without this, the
 # "Graphics: other stacks" entries boot with an empty cmdline (no vendor args) and reboot at once.
