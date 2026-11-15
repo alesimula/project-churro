@@ -192,8 +192,10 @@ exit 0
 } catch {
   Write-Host "ERROR: $_" -ForegroundColor Red
 } finally {
-  if ($mp) {   # lazy if Explorer still has it open; the stick goes away right after anyway
-    wsl.exe -d $distro -u root -- sh -c "umount '$mp' 2>/dev/null || umount -l '$mp'; rmdir '$mp'"
+  if ($mp) {
+    # sync, then a real umount (it writes everything back); retried while Explorer still holds a
+    # file. Only as a last resort lazy, after another sync: the stick leaves WSL right after
+    wsl.exe -d $distro -u root -- sh -c "sync; for i in 1 2 3 4 5; do umount '$mp' 2>/dev/null && break; sleep 1; done; if mountpoint -q '$mp'; then echo 'still busy: lazy unmount'; sync; umount -l '$mp'; fi; sync; blockdev --flushbufs $sdev; rmdir '$mp'"
     Write-Host "$mp unmounted."
   }
   if ($keep) { Stop-Process -Id $keep.Id -ErrorAction SilentlyContinue }
