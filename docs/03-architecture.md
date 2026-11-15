@@ -468,6 +468,31 @@ files get a sibling's label or an explicit one.
   `CONFIG_SND_VERBOSE_PROCFS`, which changes `struct snd_pcm_substream` (GKI kABI): not used. The child stays in the `kernel` SELinux
   domain, so the feature adds the needed rules to the vendor policy and drops the precompiled
   policy (init compiles it at boot). Feature hooks used: `build-ramdisk.sh`, `cmdline-debug`.
+* `boot-splash` (default) — the logo while booting, the same picture and size before and after
+  GRUB: a pre-made 1600 px square TGA (logo in the middle, black around it; `mk-splash.sh` remakes
+  both from `docs/logo/churro-logo.svg`) scaled to fit the screen, i.e. to its height on a
+  landscape screen. GRUB can't scale to a percentage or read SVG; its theme's `padding` mode does
+  the fit. **Installed disks** (`boot_source=internal`, `default=0`, `env.cfg`): grub.cfg hands
+  over to `churro/splash.cfg`, a 3 s menu whose theme shows only `splash-tab.tga` ("Press Tab for
+  boot options"); Tab is the hotkey of an invisible "Boot options" entry that reopens grub.cfg
+  as the usual text menu (`churro_menu=1`). Any other key stops the countdown unseen (Enter
+  boots). **Sticks**: the usual menu. **Then, in Linux**: the normal entry (only it: the debug
+  entries keep their `rdinit=/churro/logger`, and a missing rdinit program panics the kernel, so
+  `rdinit=` is only added when the feature is in) starts `/churro/splash` (static,
+  `features/boot-splash/splash.c`) as `rdinit`: it draws `splash.tga` on simpledrm's fb0 (the
+  firmware framebuffer, its own device nodes: no devtmpfs), switches tty0 to `KD_GRAPHICS` so
+  fbcon draws nothing over it, and execs `/init` (on any failure: just `/init`). ~0.1 s; the
+  picture stays until the GPU driver takes the display (black until Android's boot animation).
+  Between the two, GRUB clears the screen while it loads the kernel. **Screen mode**: firmware
+  can leave a low mode (its boot menu, a key pressed during POST: 1024x768 on the 1366x768
+  T300FA), which the panel stretches, and the GPU driver's switch to native blanks the screen.
+  GRUB's `auto` keeps that mode, `gfxpayload` is ignored (Linux starts through its EFI stub) and
+  GRUB can't read the preferred mode into a variable, so the theme's `gfxmode` is a list of
+  usual native modes, largest first (then `auto`), and the normal entry adds
+  `video=efifb:auto` (the stub sets the firmware's largest mode). Both assume the firmware
+  offers no mode larger than the panel's (true for real GOPs seen so far; QEMU's OVMF does).
+  Self-check:
+  `features/boot-splash/splash-test.sh`.
 * `gpu-nouveau` (default) — NVIDIA GPUs (nouveau.ko itself comes with drivers-extra):
   `nouveau.atomic=1` for drm_hwcomposer, and wildcard SELinux labels so apps can read any GPU's
   PCI ID files (Mesa's device enumeration). Details: docs/05.

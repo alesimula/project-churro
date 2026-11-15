@@ -54,7 +54,7 @@ EOF
   # command fails there and no quirk applies
   local smb=; [ -f /usr/lib/grub/x86_64-efi/smbios.mod ] && smb=smbios
   grub-mkstandalone -O x86_64-efi -o "$mnt/EFI/BOOT/BOOTX64.EFI" \
-    --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop $uga $smb probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
+    --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop $uga $smb probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci gfxterm gfxmenu tga" \
     --locales="" --fonts="" "boot/grub/grub.cfg=$stub"
   rm -f "$stub"
   # where CHURRO-ESPID's UUID sits in the binary (churro-install: toybox grep has no byte offsets)
@@ -69,6 +69,59 @@ EOF
   cp "$stage/initrd.img" "$mnt/churro/initrd.img"
   # what this build is (churro.sh): the installer's update shows the old and the new one
   if [ -f "$stage/build.txt" ]; then cp "$stage/build.txt" "$mnt/churro/build.txt"; fi
+  # features/boot-splash, installed disks: the logo instead of the menu for 3 s (Tab: the menu),
+  # sized like the one churro-splash then draws (rdinit, normal entry only; a missing rdinit
+  # program panics the kernel, so only when the feature is in). padding = fit to the screen.
+  local spl="" splcfg="" splmode=""
+  if [ -n "${CHURRO_SPLASH:-}" ]; then
+    # Screen mode: the firmware can leave a low one (its boot menu, or a key pressed during POST:
+    # 1024x768 on the 1366x768 ASUS T300FA), which the panel stretches, and the GPU driver's switch
+    # to native then blanks the screen. GRUB's "auto" keeps that mode and GRUB can't read the
+    # panel's preferred one into a variable; gfxpayload does nothing here (Linux starts through
+    # its EFI stub). So Linux: video=efifb:auto, the stub picks the firmware's largest mode. GRUB's
+    # theme: the largest of the usual native modes the firmware offers, else auto. Firmware modes
+    # larger than the panel's are rare (QEMU has some).
+    spl=" rdinit=/churro/splash video=efifb:auto"
+    local m modes; modes=$(for m in 3840x2400 3840x2160 3456x2160 3440x1440 3200x2000 3200x1800 3000x2000 \
+        2880x1920 2880x1800 2560x1600 2560x1440 2560x1080 2496x1664 2256x1504 2160x1440 1920x1280 \
+        1920x1200 1920x1080 1680x1050 1600x900 1536x1024 1440x900 1366x768 1360x768 1280x1024 \
+        1280x800 1280x720 1024x768; do echo "$(( ${m%x*} * ${m#*x} )) $m"; done | sort -rn | cut -d' ' -f2 | paste -sd';')
+    splmode="set churro_modes=\"$modes;auto\"
+export churro_modes"
+    cp "$CHURRO_SPLASH/splash-tab.tga" "$mnt/churro/"
+    cat > "$mnt/churro/theme.txt" <<'EOF'
+desktop-image: "splash-tab.tga"
+desktop-image-scale-method: "padding"
+desktop-image-h-align: "center"
+desktop-image-v-align: "center"
+desktop-color: "#000000"
+title-text: ""
+terminal-left: "0"
+terminal-top: "0"
+terminal-width: "1"
+terminal-height: "1"
+terminal-border: "0"
+EOF
+    # the menu's other keys work too, unseen: any key stops the countdown (Enter boots)
+    cat > "$mnt/churro/splash.cfg" <<'EOF'
+set theme=($root)/churro/theme.txt
+set gfxmode="$churro_modes"
+terminal_output gfxterm
+set timeout=3
+set default=0
+menuentry "Googlebook OS (Churro)" {
+  linux ($root)/churro/kernel $base $extra_args $gfx rdinit=/churro/splash video=efifb:auto
+  initrd ($root)/churro/initrd.img
+}
+menuentry "Boot options" --hotkey=tab {
+  terminal_output console
+  set churro_menu=1
+  export churro_menu
+  configfile ($root)/churro/grub.cfg
+}
+EOF
+    splcfg="if [ \"\$boot_source\" = internal -a \"\$default\" = 0 -a -z \"\$churro_menu\" ]; then configfile (\$root)/churro/splash.cfg; fi"
+  fi
 
   # env.cfg is the per-install knob file (the installer flips boot_source to internal).
   cat > "$mnt/churro/env.cfg" <<EOF
@@ -206,10 +259,12 @@ if [ "\$igpu" = "8086" ]; then if regexp '^0*($d13)\$' "\$igpudev"; then set bas
 set gfx="androidboot.churro.gfx=\$gfx \$vk"
 # A submenu opens a new GRUB context that only sees exported variables: without this, the
 # "Graphics: other stacks" entries boot with an empty cmdline (no vendor args) and reboot at once.
-export base dbg extra_args vk
+export base dbg extra_args vk gfx
+$splmode
+$splcfg
 
 menuentry "Googlebook OS (Churro)" {
-  linux (\$root)/churro/kernel \$base \$extra_args \$gfx
+  linux (\$root)/churro/kernel \$base \$extra_args \$gfx$spl
   initrd (\$root)/churro/initrd.img
 }
 menuentry "Googlebook OS (Churro) - debug (log on screen + CHURRO-LOG/boot.log)" {

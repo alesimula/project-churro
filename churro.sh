@@ -236,6 +236,7 @@ EOF
   # churro/build.txt: Google's build + when Churro built this (disk-install: update old -> new)
   { echo "$binfo"; echo "CHURRO_BUILT=$(date -u +%Y-%m-%dT%H:%MZ)"; } > "$W/build.txt"
   case ",$feats," in *,disk-install,*) export CHURRO_INSTALLER=1 ;; esac
+  case ",$feats," in *,boot-splash,*) export CHURRO_SPLASH="$HERE/features/boot-splash" ;; esac
   esp_build "$(part EFI-SYSTEM)" "$W" "$vcmd" "$bsrc" "${ln:+${LOOP}p$ln}"
   if [ -s "$CHURRO_NOTES" ]; then
     log "$(wc -l < "$CHURRO_NOTES") thing(s) expected in the image by name but not found; the edits didn't happen (docs/09-version-support.md):"
@@ -298,7 +299,7 @@ cmd_auto() {
     [ "$p" != i915 ] || die "the i915 pack is retired (it broke xe on Gen12+): i915 now comes with drivers-extra and only loads on Intel GPUs xe doesn't drive"
     [ -d "$CHURRO_PACK_DIR/$p" ] || die "no module pack '$p' in $CHURRO_PACK_DIR"; margs+=(--modules "$CHURRO_PACK_DIR/$p"); done
   [ "$gfx" = auto ] || CHURRO_EXTRA_ARGS="androidboot.churro.gfx=$gfx ${CHURRO_EXTRA_ARGS:-}"
-  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density$tpad,disk-install,debug-log$xfeat" "${margs[@]}"
+  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density$tpad,disk-install,debug-log,boot-splash$xfeat" "${margs[@]}"
 }
 
 case ${1:-} in auto|build) deps_ensure ;; esac   # install only needs the tools cmd_install checks
