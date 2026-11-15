@@ -41,8 +41,10 @@ cat >> "$S/vendor_sepolicy.cil" <<EOF
 ; screens (/dev/dri/card*), makes them probe outputs they haven't yet ("detect" to
 ; /sys/class/drm/*/status: Google's policy lets it read sysfs, not write); its lines go to the
 ; boot log (/dev/kmsg). Opening a DRM device makes the kernel check CAP_SYS_ADMIN (only to mark
-; the file "authenticated", not needed here): not granted, not logged.
+; the file "authenticated", not needed here): not granted, not logged. It also reads the main
+; screen GPU's driver link (amd mode: its render node, churro-density).
 (allow get_variant_audio sysfs_$V (file (write)))
+(allow get_variant_audio sysfs_$V (lnk_file (read getattr)))
 (allow get_variant_audio gpu_device_$V (dir (search getattr open read)))
 (allow get_variant_audio gpu_device_$V (chr_file (getattr open read write ioctl)))
 (allow get_variant_audio kmsg_device_$V (chr_file (getattr open write append)))

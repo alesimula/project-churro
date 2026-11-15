@@ -364,6 +364,9 @@ files get a sibling's label or an explicit one.
     `/dev/kmsg_debug`, which only debug builds have): `churro-density: card0-eDP-1 2560x1600
     350mm -> 200`. Examples (all in `churro-density-test.sh`, a self-check with a stub `churro-drm`):
     1366x768 13.3" → 160, 1920x1080 24" monitor → 160, MSI 2560x1600 16" → 204, 4K 27" → 176.
+    When that screen's GPU is driven by amdgpu it also sets `vendor.audio.churro.render` (its
+    render node's minor): the `amd` graphics mode copies it to `ro.boot.churro.render` and
+    minigbm allocates there (APU + AMD dGPU laptops: the dGPU is the first render node).
 
   Why the kernel's sizes and not our own EDID parsing (the first version read `/sys/class/drm/*/edid`
   and its first detailed timing): the MSI Vector 16's panel declares 640x400 mm there when driven

@@ -8,3 +8,23 @@ on early-init
     setprop ro.hwui.use_vulkan true
     setprop debug.renderengine.vulkan true
     setprop ro.vendor.hwc.use_overlay_planes false
+
+# minigbm allocates on the amdgpu GPU of the main screen (churro-density found it, display-density):
+# an APU + AMD dGPU laptop's first render node is the dGPU, its panel on the APU. ro.boot.: every
+# process reads it (the mapper runs in apps); init sets it here (system_ext: init, not vendor_init)
+on late-fs && property:vendor.audio.churro.render=128
+    setprop ro.boot.churro.render 128
+on late-fs && property:vendor.audio.churro.render=129
+    setprop ro.boot.churro.render 129
+on late-fs && property:vendor.audio.churro.render=130
+    setprop ro.boot.churro.render 130
+on late-fs && property:vendor.audio.churro.render=131
+    setprop ro.boot.churro.render 131
+on late-fs && property:vendor.audio.churro.render=132
+    setprop ro.boot.churro.render 132
+on late-fs && property:vendor.audio.churro.render=133
+    setprop ro.boot.churro.render 133
+on late-fs && property:vendor.audio.churro.render=134
+    setprop ro.boot.churro.render 134
+on late-fs && property:vendor.audio.churro.render=135
+    setprop ro.boot.churro.render 135

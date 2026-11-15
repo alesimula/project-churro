@@ -547,11 +547,11 @@ Next steps (each needs hardware to test):
 - AMD: done blind as `amdgpu-linear.patch` (linear buffers, amd mode only; untested). Tiled/DCC
   buffers would need minigbm's own `amdgpu` backend (`DRV_AMDGPU`), which loads radeonsi through
   the DRI interface: a later speed-up, once linear works on hardware.
-  Known limits (code review, not seen on hardware yet):
+  Known limits (code review, not seen on hardware yet; details in docs/notes/amd-open-issues.md):
   - An NVIDIA GPU wins over AMD at boot: Ryzen desktops have an iGPU while the monitor is on the
     card. APU + NVIDIA laptops (panel on the APU) need the "AMD (amdgpu + RADV)" entry.
-  - APU + AMD dGPU: minigbm takes the first amdgpu render node, possibly the dGPU while the panel
-    is on the APU.
+  - APU + AMD dGPU: handled: minigbm allocates on the render node of the main screen's GPU
+    (churro-density -> `ro.boot.churro.render`).
   - GFX8 (Polaris, Carrizo/Stoney): the 256-byte pitch only matches RADV's own (64-byte) when
     RADV reads the layout from gralloc; otherwise sheared images at some widths. Logcat from the
     first Polaris tester.

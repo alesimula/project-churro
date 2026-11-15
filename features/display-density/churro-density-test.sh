@@ -20,3 +20,14 @@ check 204 "panel wins over monitor"      "ext 1920 1080 510 287 card0-HDMI-A-1" 
 check 240 "real GPU wins over simpledrm" "fw 2880 1800 0 0 card0-Unknown-1" "panel 2880 1800 330 206 card1-eDP-1"
 check 160 "simpledrm only, 1024x600"     "fw 1024 600 0 0 card0-Unknown-1"
 check ""  "no screen: nothing set"       ""
+# render node of an amdgpu screen (gfx-amd.rc -> minigbm), none for other drivers
+mkdir -p $W/sys/class/drm/card1/device/drm/renderD129 $W/sys/class/drm/card0/device/drm/renderD128 $W/drv/amdgpu $W/drv/i915
+ln -s $W/drv/amdgpu $W/sys/class/drm/card1/device/driver; ln -s $W/drv/i915 $W/sys/class/drm/card0/device/driver
+render() {  # render <want> <name> <churro-drm line>
+  printf '%s\n' "$3" > $W/drm.out; : > $W/props
+  PATH=$W/bin:$PATH CHURRO_DRM="cat $W/drm.out" CHURRO_SYS=$W/sys ${SH:-sh} "$S" 2>/dev/null
+  got=$(sed -n 's/^setprop vendor.audio.churro.render //p' $W/props)
+  [ "$got" = "$1" ] || { echo "FAIL $2: got '$got', want '$1'"; exit 1; }; echo "ok $2 ($got)"
+}
+render 129 "amdgpu panel: its render node" "panel 1920 1080 344 194 card1-eDP-1"
+render ""  "i915 panel: none"              "panel 1920 1080 344 194 card0-eDP-1"

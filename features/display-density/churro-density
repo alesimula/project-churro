@@ -24,3 +24,8 @@ d=$((d / 4 * 4))          # churro-density.rc has a trigger per multiple of 4
 [ $d -lt 100 ] && d=100; [ $d -gt 640 ] && d=640
 echo "churro-density: $4 ${w}x$h ${mm}mm -> $d" >&2
 setprop vendor.audio.churro.density $d
+# the amd graphics mode (gfx-amd.rc) allocates buffers on the GPU of this screen: on an APU + AMD
+# dGPU laptop the first render node is the dGPU while the panel is on the APU
+g=${CHURRO_SYS:-/sys}/class/drm/${4%%-*}/device
+case $(readlink $g/driver) in */amdgpu) for r in $g/drm/renderD*; do
+  [ -e "$r" ] && setprop vendor.audio.churro.render ${r##*renderD}; done ;; esac

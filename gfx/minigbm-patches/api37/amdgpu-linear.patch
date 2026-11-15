@@ -1,6 +1,6 @@
 --- a/dumb_driver.c	2026-11-15 14:15:37.321716610 +0100
 +++ b/dumb_driver.c	2026-11-15 14:15:37.338142304 +0100
-@@ -82,3 +82,144 @@
+@@ -82,3 +82,154 @@
  #ifndef DRV_MEDIATEK
  INIT_DUMB_DRIVER(mediatek)
  #endif
@@ -16,8 +16,11 @@
 + * carve-out to scan it out. Only in the amd graphics mode (androidboot.churro.gfx=amd): on a
 + * hybrid machine the other GPU's mode must not end up with buffers from this render node.
 + */
++#include <stdlib.h>
 +#include <string.h>
 +#include <sys/mman.h>
++#include <sys/stat.h>
++#include <sys/sysmacros.h>
 +#include <xf86drm.h>
 +#include <amdgpu_drm.h>
 +
@@ -31,9 +34,16 @@
 +
 +static int amdgpu_linear_init(struct driver *drv)
 +{
-+	const char *gfx = drv_get_os_option("ro.boot.churro.gfx");
++	const char *gfx = drv_get_os_option("ro.boot.churro.gfx"), *render;
++	struct stat st;
 +
++	/* before the next drv_get_os_option: it returns one static buffer */
 +	if (!gfx || strcmp(gfx, "amd"))
++		return -ENODEV;
++	render = drv_get_os_option("ro.boot.churro.render");
++	/* the GPU of the main screen (gfx-amd.rc): on an APU + AMD dGPU laptop the first render node
++	 * is the dGPU while the panel is on the APU. Unset (no amdgpu screen found): the first node */
++	if (render && !fstat(drv->fd, &st) && minor(st.st_rdev) != (unsigned)atoi(render))
 +		return -ENODEV;
 +	drv_add_combinations(drv, amdgpu_render_formats, ARRAY_SIZE(amdgpu_render_formats),
 +			     &LINEAR_METADATA, BO_USE_RENDER_MASK | BO_USE_SCANOUT);
