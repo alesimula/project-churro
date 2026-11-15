@@ -50,8 +50,11 @@ configfile "($root)/churro/grub.cfg"
 EOF
   # efi_uga (pre-GOP firmware video) is gone from GRUB 2.14 (Ubuntu 26.04): add it only if present
   local uga=; [ -f /usr/lib/grub/x86_64-efi/efi_uga.mod ] && uga=efi_uga
+  # smbios: board quirks in grub.cfg go by the SMBIOS product name; without the module the
+  # command fails there and no quirk applies
+  local smb=; [ -f /usr/lib/grub/x86_64-efi/smbios.mod ] && smb=smbios
   grub-mkstandalone -O x86_64-efi -o "$mnt/EFI/BOOT/BOOTX64.EFI" \
-    --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop $uga probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
+    --modules="part_gpt part_msdos fat normal linux echo all_video efi_gop $uga $smb probe regexp configfile test cat efifwsetup search search_fs_file sleep setpci" \
     --locales="" --fonts="" "boot/grub/grub.cfg=$stub"
   rm -f "$stub"
   # where CHURRO-ESPID's UUID sits in the binary (churro-install: toybox grep has no byte offsets)
@@ -119,15 +122,35 @@ EOF
 )
     inst=${inst//@DBG@/${CHURRO_DEBUG_ARGS:-}}
   fi
+  # board quirks add to the vendor cmdline's module_blacklist (the kernel only keeps the last
+  # module_blacklist=, so a second one would drop the TPM/SPI safety list): \${qblk} in grub.cfg
+  local vq; vq=$(printf '%s' "$vcmd" | sed -E 's/(module_blacklist=[^ ]*)/\1${qblk}/')
   cat > "$mnt/churro/grub.cfg" <<EOF
 # Project Churro boot menu. Kernel cmdline = Googlebook vendor_boot cmdline + Churro additions.
 set timeout=5
 set default=0
 source (\$root)/churro/env.cfg
 probe --set=puuid --part-uuid (\$root)
-set vcmd="$vcmd"
+# Board quirks, by SMBIOS system product name (coreboot names Chromebooks after their board).
+# qblk: more modules for module_blacklist (",a,b"); qargs: kernel args, before \$extra_args so
+# env.cfg can override them.
+set qblk=""
+set qargs=""
+set product=""
+smbios --type 1 --get-string 5 --set product
+# Google Pixel Slate (Nocturne, Kaby/Amber Lake-Y; docs/05 "Machines tried"):
+# - hid_google_hammer (detachable keyboard): the machine hard-resets ~0.1 s after it loads,
+#   13-15 s into every boot, nothing logged. Blocked together with the ChromeOS EC drivers.
+# - audio only works on the AVS driver (dsp_driver=4; the DSP firmware in linux-firmware is
+#   older than AVS expects; obsolete_card_names keeps the card names the UCM/config match)
+# - AVF on plain KVM (pKVM stays off): non-protected VMs, for the Linux Terminal app
+if regexp '^[Nn]octurne\$' "\$product"; then
+  set qblk=",hid_google_hammer,cros_ec,cros_ec_lpcs,cros_usbpd_notify"
+  set qargs="snd_intel_dspcfg.dsp_driver=4 snd_soc_avs.ignore_fw_version=1 snd_soc_avs.obsolete_card_names=1 androidboot.hypervisor.vm.supported=1 androidboot.hypervisor.protected_vm.supported=0"
+fi
+set vcmd="$vq"
 
-set base="\$vcmd androidboot.boot_part_uuid=\$puuid androidboot.boot_source=\$boot_source"
+set base="\$vcmd \$qargs androidboot.boot_part_uuid=\$puuid androidboot.boot_source=\$boot_source"
 # debug: log on screen (fbcon) + serial, stop on errors instead of rebooting (panic=0; Android
 # init's fatal errors become panics; the image's lockup watchdogs only warn), plus feature debug
 # args (debug-log: boot.log on the CHURRO-LOG partition).
