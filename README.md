@@ -58,7 +58,9 @@ or `mesa` on our i915 (older Intel, loaded only there), NVIDIA without iGPU → 
 `soft`; switchable in the GRUB menu) and `--packs virt,gpu,storage[,wifi]` (`wifi` = Atheros ath9k,
 drop it on machines with Intel Wi-Fi) and `--data-size N`
 (Android's data partition in GiB, default 12; the image is then ~26 GiB, so use a USB stick of
-32 GB or more — the image's own 4 GiB fills up on first boot).
+32 GB or more — the image's own 4 GiB fills up on first boot), and `--stock-touchpad` (keep
+Googlebook's own touchpad behaviour: without it, Churro learns the real size of touchpads whose
+driver reports a smaller one, and turns on tap-dragging and the bottom-right corner right click by default).
 Hardware status and roadmap: [docs/05-hardware-support.md](docs/05-hardware-support.md).
 `CHURRO_NPU=true` lets the NPU driver load (off by default: it froze an Arrow Lake laptop).
 

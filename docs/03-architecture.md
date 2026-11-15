@@ -303,6 +303,39 @@ files get a sibling's label or an explicit one.
   allow rules. Self-check: `churro-install-test.sh` (loop devices, also under mksh). Limits:
   512-byte-sector disks only, US keyboard layout (YES/ZES accepted), small console font on HiDPI
   panels, no verification pass after the copy.
+* `touchpad-generic` (default; `churro.sh auto --stock-touchpad` leaves it out) — touchpads work
+  like on a desktop, on any PC. Android handles touchpads with ChromeOS's gesture library
+  (`libchrome-gestures`), which takes the pad's size from the driver's declared range once, when
+  the input system opens the device, and treats contacts past the declared right edge as palms.
+  Some drivers declare too small a range: `hid-asus` gives ASUS keyboard docks it doesn't know by
+  model name (the T300FA) the T100TA's 2240x1120, and computes y = max_y - raw, so x overshoots
+  and the top goes negative: the right part of the pad (and its bottom-right "button") was dead.
+  1. `/vendor/bin/churro-touchpad` (static C, `churro-touchpad.c`, service started at
+     `on post-fs-data`, root, own SELinux domain `churro_touchpad`): watches every touchpad
+     (multitouch protocol B, pointer or clickpad, not a touchscreen) alongside Android and learns
+     its real range from the touches: a side grows only to a value two separate touches both went
+     past (each with 3+ events beyond a 2% noise margin; a quarter of that once grown), never
+     shrinks, ignores values more than one driver span outside the driver's range. The range is
+     stored in `/data/vendor/churro/touchpad-ranges` per PC model + bus/vendor/product/version +
+     name (docks share USB IDs across models), with the driver's own range (an entry for another
+     driver range is dropped and learned again). It is applied with `EVIOCSABS` at startup
+     (before Android's input system), on hotplug and right after learning; then, once the pad has
+     been idle for 3 s with no finger and no button or key down, the node is "bounced": `remove`
+     then `add` written to `/sys/class/input/eventN/uevent`, so ueventd deletes and recreates
+     `/dev/input/eventN` and Android's EventHub reopens it and re-reads the range (the kernel
+     device and our fd stay). Each learn/apply is one `churro-touchpad:` line in the kernel log
+     (boot.log). After 15 minutes of touching with nothing out of range it stops watching that
+     pad. Self-check: `churro-touchpad-test.sh` (no root: fake evdev devices). Cost: asleep
+     unless a finger is on the pad; ~1 MB.
+  2. `touchpad-settings.sh` (run as `shell` at every boot completed): for every user that
+     exists then, `touchpad_tap_dragging` and `touchpad_right_click_zone` (Settings.System, AOSP
+     default 0) are set to 1 if they were never set, so the user's choice in Settings stays.
+     Other AOSP touchpad settings already default to desktop-like values (tap to click on,
+     natural scrolling on, pointer speed 0); middle click, disable-while-typing and drag lock
+     exist only as per-device gesture properties (IDC files), so nothing generic sets them.
+  Learning confirmed on a T300FA dock (x 0..2240 → 0..3099, y down to -580). Not proven yet: the
+  bounce making Android reopen the pad (if not, a learned range takes effect from the next boot).
+  A user created after boot (e.g. the first-boot account) gets the settings from the next boot.
 * `display-density` (default) — the default screen density (`ro.sf.lcd_density`) computed from
   the PC's main screen instead of the image's fixed value (each Googlebook image sets it for its
   own panel; the Lenovo's: 240 for 2880x1800 15.3", ~222 dpi). With 240 a 1366x768 laptop got a

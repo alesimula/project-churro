@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Project Churro - make a Googlebook OS recovery image bootable on generic UEFI PCs.
 # Usage: sudo ./churro.sh auto  <recovery.bin> <out.img> [--gfx auto|native|nouveau|mesa|soft] [--packs virt,gpu,storage,wifi]
+#                               [--stock-touchpad]
 #        sudo ./churro.sh build <recovery.bin> <out.img> [--kernel dir] [--modules <pack dir>]...
 #                               [--features a,b] [--boot-source external|internal]
 #        sudo ./churro.sh install <churro.img> <disk>
@@ -275,13 +276,14 @@ cmd_install() {
 # --gfx auto (default): the boot menu picks the graphics stack from the GPUs it finds (esp.sh).
 cmd_auto() {
   local in=$1 out=$2; shift 2
-  local gfx=auto kprof=generic packs=virt,gpu,storage xfeat="" dsize=12 vexemu=1
+  local gfx=auto kprof=generic packs=virt,gpu,storage xfeat="" dsize=12 vexemu=1 tpad=,touchpad-generic
   while [ $# -gt 0 ]; do case $1 in
     --gfx) gfx=$2; shift 2 ;; --kernel-profile) kprof=$2; shift 2 ;;
     --data-size) dsize=$2; shift 2 ;;   # userdata GiB (default 12: image ~26 GiB, needs a 32 GB stick)
     --packs) packs=$2; shift 2 ;;   # module packs from prepare.sh: virt,gpu,storage[,wifi]
     --extra-features) xfeat=,$2; shift 2 ;;   # extra features for test builds
     --vexemu) vexemu=$2; shift 2 ;;
+    --stock-touchpad) tpad=; shift ;;   # Googlebook's own touchpad behaviour (no touchpad-generic)
     *) die "unknown option $1" ;; esac; done
   bash "$HERE/tools/prepare.sh" "$in" "$kprof"
   local envf; envf=$(ls -t "${CHURRO_CACHE:-/var/cache/churro}"/prepared-*.env | head -1)
@@ -291,7 +293,7 @@ cmd_auto() {
     [ "$p" != i915 ] || die "the i915 pack is retired (it broke xe on Gen12+): i915 now comes with drivers-extra and only loads on Intel GPUs xe doesn't drive"
     [ -d "$CHURRO_PACK_DIR/$p" ] || die "no module pack '$p' in $CHURRO_PACK_DIR"; margs+=(--modules "$CHURRO_PACK_DIR/$p"); done
   [ "$gfx" = auto ] || CHURRO_EXTRA_ARGS="androidboot.churro.gfx=$gfx ${CHURRO_EXTRA_ARGS:-}"
-  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density,disk-install,debug-log$xfeat" "${margs[@]}"
+  cmd_build "$in" "$out" --kernel "$CHURRO_KERNEL" --data-size "$dsize" --vexemu "$vexemu" --features "security-software,firmware-lockdown,setup-no-ota,firmware-extra,gfx-mesa,gfx-minigbm,gpu-nouveau,crypto-generic,libs-generic,drivers-extra,audio-generic,display-density$tpad,disk-install,debug-log$xfeat" "${margs[@]}"
 }
 
 case ${1:-} in auto|build) deps_ensure ;; esac   # install only needs the tools cmd_install checks
