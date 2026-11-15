@@ -448,6 +448,7 @@ setup in `mixer_paths.xml` (the controls these codecs need to route sound, which
 | SoundWire laptops | recent premium Intel laptops (XPS / ThinkPad X1 class: RT711/RT1316, CS42L43) | card ID from `sof-soundwire`, PCM numbers and mixer controls per codec set (alsa-ucm-conf `sof-soundwire/*` is the reference) |
 | Machine-specific SOF cards | cheap ES8336 laptops, NAU8825/RT5682 Chromebook-style boards | one config per machine driver (alsa-ucm-conf has them) |
 | AMD ACP digital mics / SoundWire | AMD laptops (Ryzen 6000+) | speakers usually work via `Generic*` (HDA); the mic is a separate ACP card (`acp6x`, `acp63`, …) — a second input config |
+| AVS boards other than the Pixel Slate | Kaby Lake Chromebooks (MAX98927, DA7219, NAU8825 machine drivers) | covered: `avs_max98373` (Pixel Slate: speakers, PCM 1; mixer setup translated from the board's UCM; HDMI on the separate `hdaudioB0D2` card addressed by its ALSA ID, which the HAL accepts). Others need their own config dir named after the machine driver, plus the AVS kernel args as a GRUB board quirk (`lib/esp.sh`) |
 | HDMI audio on a separate GPU card | hybrid laptops with HDMI wired to the dGPU (MSI), desktops with discrete GPUs | the HAL only uses the one internal card; HDMI on another card (`NVidia`, `HDMI`) would need a second card in the HAL or the external-device path |
 | Unverified on SOF | — | internal mic PCM 6 and HDMI PCM 3–5 for `sofhdadsp` are from the standard topology, not tested; headphone/speaker switching relies on the kernel's auto-mute (Android shows no headphone state) |
 
@@ -477,6 +478,7 @@ three lines in `features/gfx-mesa/patch-vendor.sh` are the knob.
 | Asus VivoBook 15 (X513EA) | i7-1165G7 Tiger Lake / Iris Xe | boots with the `#UD` emulator (slow: `vpdpwssd` traps); setup wizard Wi-Fi stalls fixed by IOMMU passthrough |
 | HP AiO | older Intel | `init` invalid opcode (CPU floor) |
 | MSI (Core Ultra 7 255HX) | Arrow Lake / RTX 50 (10de:2f18) | hybrid mode: boots and runs (xe + our allocator); discrete (MUX) mode: works on nouveau/NVK (panel, HDMI, Chrome); distro driver set: touchpad works; audio works (audio-generic + churro-mixer); colour cast → SDR props (gfx-mesa) |
+| Google Pixel Slate (Nocturne, MrChromebox UEFI) | Core m3/i5/i7 Kaby/Amber Lake-Y / UHD 615 (Gen9) | boots and runs on i915 + Mesa with the Nocturne GRUB quirk (stock: hard reset when `hid-google-hammer` loads); speakers and HDMI audio (AVS, `avs_max98373` config); Linux Terminal (AVF on KVM); Wi-Fi, touch, Bluetooth; internal mics not configured (`avs_dmic` card); ruby 276.R5 image |
 
 ## Design direction: distro-style driver coverage (steps 1-2 done: distro module set + firmware)
 

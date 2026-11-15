@@ -20,11 +20,29 @@ while [ $i -lt 150 ]; do   # cards appear while modules/firmware load: retry for
   for d in /sys/class/sound/card[0-9]*; do
     [ -f "$d/id" ] || continue
     n=${d##*card}; id=$(cat "$d/id")
+    # AVS (Kaby Lake Chromebooks, e.g. Pixel Slate): match the config by machine driver
+    # (avs_max98373), since AVS card IDs aren't stable across kernels/obsolete_card_names
+    drv=$(sed -n 's/^DRIVER=//p' "$d/device/uevent" 2>/dev/null)
+    case $drv in avs_*) [ -f "/vendor/etc/audio/$drv/audio_config.xml" ] && id=$drv ;; esac
     grep -q 'Project Churro' "/vendor/etc/audio/$id/audio_config.xml" 2>/dev/null || continue
-    case $id in sof*) ;; *) analog "$n" || continue ;; esac
+    case $id in sof*|avs_*) ;; *) analog "$n" || continue ;; esac
     # HDMI entries only if this card really has HDMI PCMs (first one is 3 on PCH and SOF HDA);
     # hybrid laptops wire HDMI to the dGPU's own card
-    [ -e "/sys/class/sound/pcmC${n}D3p" ] && [ -f "/vendor/etc/audio/${id}_hdmi/audio_config.xml" ] && id=${id}_hdmi
+    case $id in
+      avs_*)
+        # Pixel Slate: HDMI/DP is a separate AVS card (ALSA ID hdaudioB0D2, PCMs 1-3); the
+        # _hdmi config addresses it by that ID, so use it only if that card is there
+        # (it can register a moment after the speaker card: wait up to 3 s)
+        j=0; h=no
+        while [ $j -lt 30 ]; do
+          grep -qx hdaudioB0D2 /sys/class/sound/card*/id 2>/dev/null && { h=yes; break; }
+          sleep 0.1; j=$((j+1))
+        done
+        [ $h = yes ] && [ -f "/vendor/etc/audio/${id}_hdmi/audio_config.xml" ] && id=${id}_hdmi
+        setprop vendor.audio.churro.hdmi "$h" ;;
+      *)
+        [ -e "/sys/class/sound/pcmC${n}D3p" ] && [ -f "/vendor/etc/audio/${id}_hdmi/audio_config.xml" ] && id=${id}_hdmi ;;
+    esac
     /vendor/bin/churro-mixer "$n"   # the kernel leaves HDA's Master muted at volume 0
     setprop vendor.audio.churro.card "$id"    # init: bind-mount config, restart the HAL
     setprop vendor.audio.churro.index "$n"    # init: rename the card to the ID the HAL wants

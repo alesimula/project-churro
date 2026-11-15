@@ -71,6 +71,138 @@ mk Generic "HD-Audio Generic" 0
 mk Generic_1 "HD-Audio Generic" 0
 mk sofhdadsp sof-hda-dsp 6 3 4 5   # SOF HDA topology: 0 analog, 3-5 HDMI, 6 DMIC
 
+# Kaby Lake Chromebooks on the AVS driver (Pixel Slate): MAX98373 speakers alone on their own
+# card, PCM 1. No headphone jack; the DMICs are a separate card (not covered yet). Needs
+# snd_intel_dspcfg.dsp_driver=4 on the kernel cmdline. get_variant_audio matches this dir by
+# machine driver name, not card ID.
+d=$A/avs_max98373; mkdir -p "$d"; ids+=(avs_max98373)
+cat > "$d/audio_config.xml" <<EOF
+<?xml version="1.0" encoding="utf-8"?>
+<!-- Project Churro audio-generic: ALSA card avs_max98373, renamed $W at boot -->
+<audio_config>
+	<SoundCardName>hw:$W</SoundCardName>
+	<HiFi>
+		<Speaker>
+			<PlaybackPCM>hw:$W,1</PlaybackPCM>
+			<DSPLatency>0</DSPLatency>
+		</Speaker>
+	</HiFi>
+</audio_config>
+EOF
+# MAX98373 amp setup translated 1:1 from the Pixel Slate's working ALSA UCM
+# (chromebook-linux-audio, Intel/avs/avs_max98373/Google-Atlas-1.0*.conf):
+# top level = UCM BootSequence (amps off, brownout/headroom protection programmed, 0 dB gains,
+# DSP gain at 0 dB); Speaker path = UCM EnableSequence (output rail 9.65V, DHT + BDE protection,
+# VI sense, amp on). Volume stays in software (HAL).
+cat > "$d/mixer_paths.xml" <<'EOF'
+<?xml version="1.0" encoding="utf-8"?>
+<mixer enum_mixer_numeric_fallback="true">
+	<ctl name="Left DAI Sel Mux" value="Left" />
+	<ctl name="Right DAI Sel Mux" value="Right" />
+	<ctl name="Left Output Voltage" value="8.60V" />
+	<ctl name="Right Output Voltage" value="8.60V" />
+	<ctl name="Left Speaker Volume" value="0" />
+	<ctl name="Right Speaker Volume" value="0" />
+	<ctl name="Left Digital Volume" value="127" />
+	<ctl name="Right Digital Volume" value="127" />
+	<ctl name="Left DHT Min Volume" value="0" />
+	<ctl name="Right DHT Min Volume" value="0" />
+	<ctl name="Left DHT Rot Pnt Volume" value="2" />
+	<ctl name="Right DHT Rot Pnt Volume" value="2" />
+	<ctl name="Left DHT Attack Step Volume" value="0" />
+	<ctl name="Right DHT Attack Step Volume" value="0" />
+	<ctl name="Left DHT Attack Rate" value="70us" />
+	<ctl name="Right DHT Attack Rate" value="70us" />
+	<ctl name="Left DHT Release Step Volume" value="0" />
+	<ctl name="Right DHT Release Step Volume" value="0" />
+	<ctl name="Left DHT Release Rate" value="1150ms" />
+	<ctl name="Right DHT Release Rate" value="1150ms" />
+	<ctl name="Left BDE LVL1 Thresh" value="120" />
+	<ctl name="Right BDE LVL1 Thresh" value="120" />
+	<ctl name="Left BDE LVL1 Clip Reduction Volume" value="58" />
+	<ctl name="Right BDE LVL1 Clip Reduction Volume" value="58" />
+	<ctl name="Left BDE LVL1 Clip Thresh Volume" value="60" />
+	<ctl name="Right BDE LVL1 Clip Thresh Volume" value="60" />
+	<ctl name="Left BDE LVL1 Limiter Thresh Volume" value="14" />
+	<ctl name="Right BDE LVL1 Limiter Thresh Volume" value="14" />
+	<ctl name="Left BDE LVL2 Thresh" value="117" />
+	<ctl name="Right BDE LVL2 Thresh" value="117" />
+	<ctl name="Left BDE LVL2 Clip Reduction Volume" value="58" />
+	<ctl name="Right BDE LVL2 Clip Reduction Volume" value="58" />
+	<ctl name="Left BDE LVL2 Clip Thresh Volume" value="60" />
+	<ctl name="Right BDE LVL2 Clip Thresh Volume" value="60" />
+	<ctl name="Left BDE LVL2 Limiter Thresh Volume" value="13" />
+	<ctl name="Right BDE LVL2 Limiter Thresh Volume" value="13" />
+	<ctl name="Left BDE LVL3 Thresh" value="114" />
+	<ctl name="Right BDE LVL3 Thresh" value="114" />
+	<ctl name="Left BDE LVL3 Clip Reduction Volume" value="56" />
+	<ctl name="Right BDE LVL3 Clip Reduction Volume" value="56" />
+	<ctl name="Left BDE LVL3 Clip Thresh Volume" value="60" />
+	<ctl name="Right BDE LVL3 Clip Thresh Volume" value="60" />
+	<ctl name="Left BDE LVL3 Limiter Thresh Volume" value="12" />
+	<ctl name="Right BDE LVL3 Limiter Thresh Volume" value="12" />
+	<ctl name="Left BDE LVL4 Thresh" value="112" />
+	<ctl name="Right BDE LVL4 Thresh" value="112" />
+	<ctl name="Left BDE LVL4 Mute Switch" value="0" />
+	<ctl name="Right BDE LVL4 Mute Switch" value="0" />
+	<ctl name="Left BDE LVL4 Hold Switch" value="0" />
+	<ctl name="Right BDE LVL4 Hold Switch" value="0" />
+	<ctl name="Left BDE LVL4 Clip Reduction Volume" value="55" />
+	<ctl name="Right BDE LVL4 Clip Reduction Volume" value="55" />
+	<ctl name="Left BDE LVL4 Clip Thresh Volume" value="60" />
+	<ctl name="Right BDE LVL4 Clip Thresh Volume" value="60" />
+	<ctl name="Left BDE LVL4 Limiter Thresh Volume" value="11" />
+	<ctl name="Right BDE LVL4 Limiter Thresh Volume" value="11" />
+	<ctl name="Left BDE Hold Time" value="100" />
+	<ctl name="Right BDE Hold Time" value="100" />
+	<ctl name="Left BDE Thresh Hysteresis" value="2" />
+	<ctl name="Right BDE Thresh Hysteresis" value="2" />
+	<ctl name="Left BDE Attack Rate" value="0" />
+	<ctl name="Right BDE Attack Rate" value="0" />
+	<ctl name="Left BDE Release Rate" value="5" />
+	<ctl name="Right BDE Release Rate" value="5" />
+	<ctl name="Left Digital Vol Sel Switch" value="1" />
+	<ctl name="Right Digital Vol Sel Switch" value="1" />
+	<ctl name="Left Spk Switch" value="0" />
+	<ctl name="Right Spk Switch" value="0" />
+	<ctl name="Left VI Sense Switch" value="0" />
+	<ctl name="Right VI Sense Switch" value="0" />
+	<ctl name="Left DHT Switch" value="0" />
+	<ctl name="Right DHT Switch" value="0" />
+	<ctl name="Left BDE Switch" value="0" />
+	<ctl name="Right BDE Switch" value="0" />
+	<ctl name="DSP Volume" value="1073741823" />
+	<path name="Speaker">
+		<ctl name="Left Output Voltage" value="9.65V" />
+		<ctl name="Right Output Voltage" value="9.65V" />
+		<ctl name="Left DHT Switch" value="1" />
+		<ctl name="Right DHT Switch" value="1" />
+		<ctl name="Left BDE Switch" value="1" />
+		<ctl name="Right BDE Switch" value="1" />
+		<ctl name="Left VI Sense Switch" value="1" />
+		<ctl name="Right VI Sense Switch" value="1" />
+		<ctl name="Left Spk Switch" value="1" />
+		<ctl name="Right Spk Switch" value="1" />
+	</path>
+</mixer>
+EOF
+cp "$A/${boards[0]}/volume_curves.xml" "$d/"
+[ -f "$A/${boards[0]}/dsp.ini" ] && cp "$A/${boards[0]}/dsp.ini" "$d/"
+find "$d" -exec chown -h root:root {} + -exec setfattr -h -n security.selinux -v "$CFG" {} \;
+# avs_max98373_hdmi: the same plus HDMI/DP. On AVS that's its own card (hdaudioB0D2: PCMs 1-3,
+# jacks "hdaudioB0D2 HDMI/DP,pcm=N"), addressed by its ALSA ID since the HAL only renames one
+# card; get_variant_audio picks this only when that card exists.
+h=$A/avs_max98373_hdmi; rm -rf "$h"; cp -a "$d" "$h"; ids+=(avs_max98373_hdmi)
+hd=""; hp=""
+for n in 1 2 3; do
+  hd+=$(printf '\t\t<HDMI%d>\n\t\t\t<PlaybackPCM>hw:hdaudioB0D2,%d</PlaybackPCM>\n\t\t\t<JackDev>hdaudioB0D2 HDMI/DP,pcm=%d</JackDev>\n\t\t\t<PlaybackChannels>2</PlaybackChannels>\n\t\t</HDMI%d>\n_' $n $n $n $n); hd=${hd%_}
+  hp+=$(printf '\t<path name="HDMI%d" />\n_' $n); hp=${hp%_}
+done
+awk -v x="$hd" '/<\/HiFi>/ { printf "%s", x } { print }' "$d/audio_config.xml" > "$h/audio_config.xml"
+awk -v x="$hp" '/^<\/mixer>/ { printf "%s", x } { print }' "$d/mixer_paths.xml" > "$h/mixer_paths.xml"
+sed -i 's/ALSA card avs_max98373,/ALSA card avs_max98373 + hdaudioB0D2 (HDMI),/' "$h/audio_config.xml"
+find "$h" -exec chown -h root:root {} + -exec setfattr -h -n security.selinux -v "$CFG" {} \;
+
 tr -d '\r' < "$F/get_variant_audio" > "$T/bin/get_variant_audio"   # Windows checkouts: CRLF
 chown root:2000 "$T/bin/get_variant_audio"; chmod 0755 "$T/bin/get_variant_audio"
 setfattr -n security.selinux -v u:object_r:get_variant_audio_exec:s0 "$T/bin/get_variant_audio"
