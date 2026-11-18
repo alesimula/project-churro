@@ -102,3 +102,16 @@ EOF
 # /dev/dri/card0 -> drm_hwcomposer finds no display, boots headless (~1 boot in 2). Sequential.
 grep -q '^parallel_ueventd_main_loop enabled$' "$V/etc/ueventd.rc" || note "gfx-mesa: no 'parallel_ueventd_main_loop enabled' in vendor ueventd.rc (renamed or already off?)"
 edit 's/^parallel_ueventd_main_loop enabled$/parallel_ueventd_main_loop disabled/' "$V/etc/ueventd.rc"
+
+# 6. Mesa in the codec services (mediacodec domain: cros-codecs, VA-API on AMD/nouveau) reads
+# its mesa.* options (vendor_mesa_prop, Google's label) and probes a few unlabelled names: denied
+# hundreds of times per boot (AMD tester's log). Read its own options, keep the rest quiet.
+S=$V/etc/selinux; P=$(cat "$S/plat_sepolicy_vers.txt")
+if grep -q '(type vendor_mesa_prop)' "$S/vendor_sepolicy.cil"; then
+  cat >> "$S/vendor_sepolicy.cil" <<CIL
+; Project Churro gfx-mesa: Mesa options readable in the codec services
+(allow mediacodec vendor_mesa_prop (file (read open getattr map)))
+(dontaudit mediacodec default_prop_$P (file (read open getattr map)))
+CIL
+  rm -f "$S"/precompiled_sepolicy "$S"/precompiled_sepolicy.*.sha256
+else note "gfx-mesa: no vendor_mesa_prop type in the vendor policy (renamed?): mediacodec's Mesa denials stay"; fi
