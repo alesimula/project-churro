@@ -19,7 +19,10 @@ log() { echo ">> $*"; }
 G="https://android.googlesource.com"
 
 # --- 1. kernel identity from the image ---
-L=$(losetup -f --show -r -P "$IMG"); trap 'losetup -d "$L"' EXIT; sleep 1
+# on failure also stop the background downloads (BG_PIDS, prefetch below), those still ours: a
+# finished one's PID may belong to another process by then
+stop_bg() { local p; for p in ${BG_PIDS:-}; do grep -qa prepare.sh "/proc/$p/cmdline" 2>/dev/null && kill "$p"; done; true; }
+L=$(losetup -f --show -r -P "$IMG"); trap 'rc=$?; losetup -d "$L"; [ "$rc" = 0 ] || stop_bg' EXIT; sleep 1
 n=$(sgdisk -p "$L" | awk '$NF == "boot_a" {print $1}')
 W=$C/image; mkdir -p "$W"; bootimg_extract "${L}p$n" "$W"
 for t in extract-ikconfig extract-vmlinux; do
@@ -38,33 +41,55 @@ PAHOLE=v$(grep -oE 'CONFIG_PAHOLE_VERSION=[0-9]+' "$W/ikconfig" | cut -d= -f2 | 
 
 # --- 2. sources + toolchains ---
 S=$C/src-$BID; mkdir -p "$S"
-# fetch_tar <url> <dir>: download (3 tries; googlesource +archive can't resume) and extract;
-# <dir> only appears once complete, so an interrupted run never leaves a half tree behind.
+# fetch_tar <url> <dir> [tries=3]: download and extract (googlesource +archive can't resume, and
+# under load it sometimes ends a stream early with success: curl exit 0, truncated .tgz); <dir>
+# only appears once complete, so an interrupted run never leaves a half tree behind.
 fetch_tar() {
-  local i; for i in 1 2 3; do curl -fsSL -o "$2.tgz" "$1" && break; [ $i = 3 ] && return 1; sleep 5; done
-  rm -rf "$2.tmp" && mkdir -p "$2.tmp" && tar -xzmf "$2.tgz" -C "$2.tmp" && rm -f "$2.tgz" && mv "$2.tmp" "$2"
+  local i n=${3:-3}; for ((i = 1; i <= n; i++)); do
+    if curl -fsSL -o "$2.tgz" "$1" && rm -rf "$2.tmp" && mkdir -p "$2.tmp" && tar -I pigz -xmf "$2.tgz" -C "$2.tmp"; then
+      rm -f "$2.tgz"; mv "$2.tmp" "$2"; return 0
+    fi
+    echo "   ${2##*/}: download failed or incomplete (try $i of $n)" >&2; [ "$i" = "$n" ] || sleep 5
+  done
+  rm -rf "$2.tmp" "$2.tgz"; return 1
 }
-[ -d "$S/common" ] || { log "kernel/common @ $(rev kernel/common)"; fetch_tar "$G/kernel/common/+archive/$(rev kernel/common).tar.gz" "$S/common"; }
-[ -d "$S/clang" ] || { log "$CLANG_NAME"; fetch_tar "$G/platform/prebuilts/clang/host/linux-x86/+archive/$(rev platform/prebuilts/clang/host/linux-x86)/$CLANG_NAME.tar.gz" "$S/clang"; }
-if [ ! -d "$S/rust" ]; then
-  RREV=$(rev platform/prebuilts/rust-toolchain/linux-x86)
+# The toolchain pieces, each a no-op once present; $1 = download tries.
+get_common() { [ -d "$S/common" ] || { log "kernel/common @ $(rev kernel/common)"
+  fetch_tar "$G/kernel/common/+archive/$(rev kernel/common).tar.gz" "$S/common" "$1"; }; }
+get_clang() { [ -d "$S/clang" ] || { log "$CLANG_NAME"
+  fetch_tar "$G/platform/prebuilts/clang/host/linux-x86/+archive/$(rev platform/prebuilts/clang/host/linux-x86)/$CLANG_NAME.tar.gz" "$S/clang" "$1"; }; }
+get_rust() {
+  [ -d "$S/rust" ] && return 0
+  local RREV d; RREV=$(rev platform/prebuilts/rust-toolchain/linux-x86)
   for d in $(curl -fsSL "$G/platform/prebuilts/rust-toolchain/linux-x86/+/$RREV/?format=JSON" | tail -c +5 | grep -oE "\"$RUST_VER[^\"]*\"" | tr -d '"' | sort -r); do
-    fetch_tar "$G/platform/prebuilts/rust-toolchain/linux-x86/+archive/$RREV/$d.tar.gz" "$S/rust-$d"
-    if "$S/rust-$d/bin/rustc" --version | grep -q "$RUST_BUILD"; then mv "$S/rust-$d" "$S/rust"; log "rust $d"; break; fi
+    fetch_tar "$G/platform/prebuilts/rust-toolchain/linux-x86/+archive/$RREV/$d.tar.gz" "$S/rust-$d" "$1" || return 1
+    if "$S/rust-$d/bin/rustc" --version | grep -q "$RUST_BUILD"; then mv "$S/rust-$d" "$S/rust"; log "rust $d"; return 0; fi
     rm -rf "$S/rust-$d"
   done
-  [ -d "$S/rust" ] || { echo "no rust toolchain matching build $RUST_BUILD" >&2; exit 1; }
-fi
+  echo "no rust toolchain matching build $RUST_BUILD" >&2; return 1
+}
+get_bindgen() { [ -x "$S/bin/bindgen" ] ||
+  { curl -fsSL "$G/platform/prebuilts/clang-tools/+/$(rev platform/prebuilts/clang-tools)/linux-x86/bin/bindgen?format=TEXT" | base64 -d > "$S/bin/bindgen.tmp" &&
+    chmod +x "$S/bin/bindgen.tmp" && mv "$S/bin/bindgen.tmp" "$S/bin/bindgen"; }; }
+get_pahole() { [ -x "$S/bin/pahole" ] || PAHOLE_VER=$PAHOLE bash "$HERE/tools/build-pahole.sh" "$S/bin"; }
+# googlesource sends each +archive slowly whatever the connection: all pieces at once, one try
+# each (on a fast line that's several times faster). Whatever failed (a slow line: the streams
+# share it and googlesource may cut slow ones) is then retried one at a time with the line free.
 mkdir -p "$S/bin"
-[ -x "$S/bin/bindgen" ] || { curl -fsSL "$G/platform/prebuilts/clang-tools/+/$(rev platform/prebuilts/clang-tools)/linux-x86/bin/bindgen?format=TEXT" | base64 -d > "$S/bin/bindgen.tmp"
-  chmod +x "$S/bin/bindgen.tmp"; mv "$S/bin/bindgen.tmp" "$S/bin/bindgen"; }
-[ -x "$S/bin/pahole" ] || PAHOLE_VER=$PAHOLE bash "$HERE/tools/build-pahole.sh" "$S/bin"
+pids=(); for g in get_common get_clang get_rust get_bindgen get_pahole; do "$g" 1 & pids+=($!); done
+for j in "${pids[@]}"; do wait "$j" || true; done
+for g in get_common get_clang get_rust get_bindgen get_pahole; do
+  "$g" 3 || { echo "toolchain download/build failed (see above)" >&2; exit 1; }; done
 
 # --- 3. Churro kernel + module packs ---
 # The patch folder for this kernel (series + build number) and its series.env (the distro config
 # tag): docs/09-version-support.md. A kernel build newer than the newest tested one still builds.
 . "$HERE/lib/versions.sh"; PD=$(kernel_patch_dir "$HERE/kmod/patches" "$REL"); . "$PD/series.env"
 . "$HERE/versions.env"
+# Big downloads the build needs later (emulator image, linux-firmware, NDK): started now, with the
+# toolchain downloads done, so they use the network while the kernel compiles instead of competing
+# with googlesource; the steps that need them wait for them (lib/prefetch.sh).
+. "$HERE/lib/prefetch.sh"; BG_PIDS=""; prefetch_start "$C"
 log "kernel patches: kmod/patches/${PD##*/}"
 [ "$BID" -le "$CHURRO_TESTED_KBUILD" ] 2>/dev/null ||
   log "NOTE: kernel build $BID is newer than the newest one tested with these patches ($CHURRO_TESTED_KBUILD), see docs/09-version-support.md"

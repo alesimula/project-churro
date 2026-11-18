@@ -12,10 +12,12 @@ T=$1; FW=$T/firmware; F=$(dirname "$0")
 . "$(dirname "$0")/../../versions.env"   # linux-firmware, sof-bin, wireless-regdb
 TAG=$CHURRO_LINUX_FIRMWARE
 C=${CHURRO_CACHE:-/var/cache/churro}/linux-firmware-$TAG; mkdir -p "$C"
-# the release tarball, unpacked once (thousands of files: one download beats one request each)
+# the release tarball, unpacked once (thousands of files: one download beats one request each);
+# usually already fetched in the background (lib/prefetch.sh)
+. "$(dirname "$0")/../../lib/prefetch.sh"
 if [ ! -f "$C/.unpacked" ]; then
-  curl -fL --retry 3 -o "$C/lf.tar.xz" "https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-$TAG.tar.xz"
-  tar xJf "$C/lf.tar.xz" -C "$C" --strip-components=1; rm -f "$C/lf.tar.xz"; touch "$C/.unpacked"
+  fetch_file "https://cdn.kernel.org/pub/linux/kernel/firmware/linux-firmware-$TAG.tar.xz" "$C/lf.tar.xz"
+  tar xJf "$C/lf.tar.xz" -C "$C" --strip-components=1; rm -f "$C/lf.tar.xz" "$C/lf.tar.xz.lock"; touch "$C/.unpacked"
 fi
 
 # The modules live on vendor_dlkm/system_dlkm (other LP partitions of the same super).

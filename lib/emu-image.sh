@@ -1,15 +1,15 @@
 # Google's public x86_64 emulator image of the same Android release (CHURRO_EMU_URL/SHA1 in
 # versions.env): the platform built for generic x86-64. Donor for software KeyMint/Gatekeeper
 # (security-software) and for core libraries without Panther Lake instructions (libs-generic).
+. "$(dirname "${BASH_SOURCE[0]}")/prefetch.sh"   # fetch_file
 # emu_part vendor|system: prints the unpacked partition's directory (downloaded/unpacked once).
 emu_part() {
   local p=$1 C=${CHURRO_CACHE:-/var/cache/churro} D Z T L off size
   D=$C/emu-$p-$(basename "$CHURRO_EMU_URL" .zip)   # per emulator image: another release's never gets reused
   [ -f "$D/.done" ] && { echo "$D"; return 0; }
   mkdir -p "$C"; Z=$C/$(basename "$CHURRO_EMU_URL")
-  [ -f "$Z" ] && echo "$CHURRO_EMU_SHA1  $Z" | sha1sum -c --quiet >/dev/null 2>&1 ||
-    { echo "   downloading $(basename "$Z") (~2.2 GB, once)" >&2; curl -fL# -o "$Z" "$CHURRO_EMU_URL" >&2; }
-  echo "$CHURRO_EMU_SHA1  $Z" | sha1sum -c --quiet >&2
+  # ~2.2 GB, once; usually already fetched in the background (lib/prefetch.sh)
+  fetch_file "$CHURRO_EMU_URL" "$Z" "$CHURRO_EMU_SHA1" || { echo "emulator image download failed or wrong SHA-1" >&2; return 1; }
   T=$(mktemp -d); rm -rf "$D"; mkdir -p "$D"
   if [ "$p" = vendor ]; then   # vendor.img: GPT, ext4 in p1
     unzip -q -o "$Z" '*/vendor.img' -d "$T"

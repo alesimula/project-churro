@@ -29,8 +29,9 @@ Check the Wi-Fi chip first (Windows Device Manager → Network adapters): "Qualc
 keep `wifi`; "Intel Dual Band Wireless-AC 7265" → drop `wifi` from `--packs`.
 
 First run downloads ~4 GB (kernel source, clang, rustc, NDK, Mesa, emulator image for KeyMint) and
-builds the kernel (~5 min on 20 cores) and Mesa (~3 min). Everything is cached in
-`/var/cache/churro`.
+builds the kernel with its distro-like module set (~12 min on 20 cores) and Mesa (~3 min): about
+28 min in all on a Core Ultra 7 255HX in WSL (measured 2026-11-18, empty cache). Everything is
+cached in `/var/cache/churro`.
 
 ## Write to USB and boot
 

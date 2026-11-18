@@ -160,7 +160,24 @@ First stage can't read `/vendor/firmware`, so packs hold only drivers that need 
 `features/<name>/` may contain `<partition>/…` (files overlaid into that EROFS partition),
 `patch-<partition>.sh` (scripted edits on the extracted tree) and `bootconfig` (extra lines).
 SELinux labels are kept from the original image (extracted with `fsck.erofs --xattrs`) and new
-files get a sibling's label or an explicit one.
+files get a sibling's label or an explicit one. Each changed partition is rebuilt with
+`mkfs.erofs -zlz4hc,12 -C262144` (fits the old extent, else grown in super) on all the CPUs the
+system gives (`--workers=$(nproc)`; erofs-utils built with `--enable-multithreading`, rebuilt
+when `tools/bin/erofs.version` changes): system/vendor/product went from 54/63/163 s to 7/4/11 s
+on 20 cores, output identical after extraction, 0.03 % larger.
+
+Build speed (`churro.sh auto`, first run = empty cache): the toolchain pieces (kernel source, clang,
+rust, bindgen, pahole) are fetched at the same time, one try each; whatever failed is retried one
+at a time (googlesource sends each `+archive` slowly, and under load it has ended streams early
+with success: `fetch_tar` treats a failed unpack as a failed download). Once they are in,
+`prepare.sh` starts the big downloads the build needs later (emulator image, linux-firmware, NDK;
+`lib/prefetch.sh`) so they run during the kernel compile; the step that needs a file waits for its
+download (`flock`) instead of fetching it again. `cmd_auto` copies the 19 GB `.bin` into the output
+image in the background from the start (disk-bound; `cmd_build` joins it). Measured on 20 cores,
+WSL: 2028 s → 1656 s (the copy wait 234 s → 10 s, vendor repack 250 s → 120 s; the kernel compile
+got ~2 min slower sharing the disk with the copy). Still not using the CPU: the toolchain downloads
+(~4 min, googlesource), BoringSSL/minigbm sources fetched from googlesource during the repack, the
+emulator system image unpacked on one core (first run), and the partition writes (WSL disk).
 
 * `security-software` (default) — replaces the Googlebook security stack (Trusty VM on x86 pKVM
   + pvmfw DICE + GSC/Ti50) with Android's software implementations: AOSP's software KeyMint

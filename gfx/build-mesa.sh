@@ -28,7 +28,10 @@ mkdir -p "$WORK"; cd "$WORK"
 export CARGO_HOME=$WORK/cargo
 export PATH=$WORK/venv/bin:$RUST/bin:$BINDGEN:$CARGO_HOME/bin:$PATH
 [ -x "$CARGO_HOME/bin/cbindgen" ] || cargo install -q --locked --version 0.29.0 cbindgen
-[ -d "android-ndk-$NDK_VER" ] || { curl -fsSL -o ndk.zip "https://dl.google.com/android/repository/android-ndk-$NDK_VER-linux.zip"; unzip -q ndk.zip; rm ndk.zip; }
+# NDK: usually already fetched in the background (lib/prefetch.sh)
+. "$HERE/../lib/prefetch.sh"
+[ -d "android-ndk-$NDK_VER" ] || { fetch_file "https://dl.google.com/android/repository/android-ndk-$NDK_VER-linux.zip" "$WORK/ndk-$NDK_VER.zip"
+  unzip -q "ndk-$NDK_VER.zip"; rm -f "ndk-$NDK_VER.zip" "ndk-$NDK_VER.zip.lock"; }
 # fresh source + the patches for this Mesa release (gfx/mesa-patches/<a.b>[-<c>]/) on every build
 [ -f "mesa-$MESA_VER.tar.xz" ] || curl -fsSL -o "mesa-$MESA_VER.tar.xz" "https://archive.mesa3d.org/mesa-$MESA_VER.tar.xz"
 rm -rf "mesa-$MESA_VER"; tar -xJf "mesa-$MESA_VER.tar.xz"

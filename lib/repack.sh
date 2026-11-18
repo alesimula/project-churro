@@ -53,8 +53,11 @@ erofs_repack() {
     [ -d "$f/$part" ] && overlay_apply "$f/$part" "$T/root"
     [ -f "$f/patch-$part.sh" ] && CHURRO_SUPER=$super CHURRO_HERE=$HERE EROFS_BIN=$EROFS_BIN bash "$f/patch-$part.sh" "$T/root"
   done
-  # lz4hc + 256K pclusters instead of Google's lz4 so the bigger tree still fits the old extent
-  "$EROFS_BIN/mkfs.erofs" -zlz4hc,12 -C262144 -T0 -U "$uuid" --mount-point="$mp" \
+  # lz4hc + 256K pclusters instead of Google's lz4 so the bigger tree still fits the old extent.
+  # Compression on every CPU this system gives us (nproc: cgroup/affinity aware), if the build
+  # has threads (tools/build-erofs-utils.sh; an EROFS_BIN from elsewhere may not).
+  local w=(); "$EROFS_BIN/mkfs.erofs" --help 2>&1 | grep -q -- --workers && w=(--workers="$(nproc)")
+  "$EROFS_BIN/mkfs.erofs" -zlz4hc,12 -C262144 -T0 "${w[@]}" -U "$uuid" --mount-point="$mp" \
      "$T/new.erofs" "$T/root" >/dev/null
   [ -n "$(getfattr --only-values -n security.selinux "$T/root" 2>/dev/null)" ] || { echo "lost SELinux labels" >&2; return 1; }
   local nsz; nsz=$(stat -c %s "$T/new.erofs")

@@ -23,8 +23,10 @@ log() { echo ">> $*"; }
 need() { for c in "$@"; do command -v "$c" >/dev/null || die "missing tool: $c"; done; }
 
 # TMPDIRS: work dirs under /tmp (build, repack), removed also when a step fails
-LOOP="" TMPDIRS=""
-cleanup() { [ -n "$LOOP" ] && losetup -d "$LOOP" 2>/dev/null; [ -z "$TMPDIRS" ] || rm -rf --one-file-system $TMPDIRS; true; }
+# COPY_PID: the image copy cmd_auto runs in the background, stopped when a step fails
+LOOP="" TMPDIRS="" COPY_PID=""
+cleanup() { [ -z "$COPY_PID" ] || kill "$COPY_PID" 2>/dev/null
+  [ -n "$LOOP" ] && losetup -d "$LOOP" 2>/dev/null; [ -z "$TMPDIRS" ] || rm -rf --one-file-system $TMPDIRS; true; }
 trap cleanup EXIT
 
 # Partition by GPT label (labels are stable across Googlebook images, numbers might not be).
@@ -92,7 +94,9 @@ cmd_build() {
   [ "$CHURRO_IMAGE_BUILD" -le "$CHURRO_TESTED_BUILD" ] ||
     log "NOTE: image build $CHURRO_IMAGE_BUILD is newer than the newest one tested ($CHURRO_TESTED_BUILD), see docs/09-version-support.md"
 
-  if [ "$(realpath "$in")" != "$(realpath -m "$out")" ]; then
+  if [ -n "$COPY_PID" ]; then   # started by cmd_auto
+    log "waiting for the image copy"; wait "$COPY_PID" || die "copying $in -> $out failed"; COPY_PID=""
+  elif [ "$(realpath "$in")" != "$(realpath -m "$out")" ]; then
     log "copying $in -> $out (sparse)"; cp --sparse=always "$in" "$out"
   fi
   # userdata: Android 17 + Google apps fill the image's 4 GiB during the first boot (ENOSPC ->
@@ -291,6 +295,15 @@ cmd_auto() {
     --vexemu) vexemu=$2; shift 2 ;;
     --stock-touchpad) tpad=; shift ;;   # Googlebook's own touchpad behaviour (no touchpad-generic)
     *) die "unknown option $1" ;; esac; done
+  # The image copy (19 GB, disk-bound) runs while prepare.sh downloads and compiles; cmd_build joins it.
+  if [ "$(realpath "$in")" != "$(realpath -m "$out")" ]; then
+    log "copying $in -> $out in the background (sparse)"; cp --sparse=always "$in" "$out" & COPY_PID=$!
+  fi
+  # the image's release, so prepare.sh's versions.env has its pins (prefetch: emulator image URL)
+  local binfo; binfo=$(bash "$HERE/tools/updater/buildinfo.sh" "$in") || die "can't read the build properties of $in"
+  CHURRO_API=$(sed -n 's/^SDK=//p' <<<"$binfo"); CHURRO_IMAGE_BUILD=$(sed -n 's/^INCREMENTAL=//p' <<<"$binfo")
+  [[ $CHURRO_IMAGE_BUILD =~ ^[0-9]+$ ]] || CHURRO_IMAGE_BUILD=0
+  export CHURRO_API CHURRO_IMAGE_BUILD
   bash "$HERE/tools/prepare.sh" "$in" "$kprof"
   local envf; envf=$(ls -t "${CHURRO_CACHE:-/var/cache/churro}"/prepared-*.env | head -1)
   # shellcheck disable=SC1090

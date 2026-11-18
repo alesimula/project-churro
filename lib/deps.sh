@@ -7,7 +7,7 @@
 #   setup-no-ota: default-jre-headless (keytool + the build-tools apksigner)
 #   Mesa Vulkan drivers: glslang-tools (glslangValidator compiles their built-in shaders)
 #   builds (kernel, pahole, erofs-utils, Mesa, static helpers): the rest
-CHURRO_PKGS="gdisk dosfstools parted grub-common grub-efi-amd64-bin cpio attr kmod openssl curl git unzip
+CHURRO_PKGS="gdisk dosfstools parted grub-common grub-efi-amd64-bin cpio attr kmod openssl curl git unzip pigz
   python3 python3-venv binutils lz4 zstd xz-utils bzip2 build-essential flex bison bc rsync pkg-config
   cmake ninja-build libssl-dev libelf-dev libdw-dev zlib1g-dev autoconf automake libtool liblz4-dev
   uuid-dev libselinux1-dev default-jre-headless glslang-tools"
@@ -23,7 +23,8 @@ DEPS_ROOT=$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)
 # shellcheck disable=SC2086  # $pkgs/$miss are word lists on purpose
 deps_ensure() {
   local p miss="" pkgs=$CHURRO_PKGS b=$DEPS_ROOT/tools/bin erofs=1
-  [ -x "$b/fsck.erofs" ] && [ -x "$b/dump.erofs" ] && [ -x "$b/mkfs.erofs" ] && erofs=0
+  [ -x "$b/fsck.erofs" ] && [ -x "$b/dump.erofs" ] && [ -x "$b/mkfs.erofs" ] &&
+    [ "$(cat "$b/erofs.version" 2>/dev/null)" = "$(. "$DEPS_ROOT/versions.env"; echo "$EROFS_VER") mt" ] && erofs=0
   if [ "${1:-}" = updater ]; then
     pkgs=$UPDATER_PKGS
     [ -n "${EROFS_BIN:-}" ] && [ -x "$EROFS_BIN/dump.erofs" ] && erofs=0
@@ -43,7 +44,7 @@ deps_ensure() {
   # erofs-utils that can extract SELinux xattrs isn't packaged (Ubuntu 24.04 has 1.7.1): built once
   # into tools/bin, which is not in git (a fresh clone or zip doesn't have it).
   if [ "$erofs" = 1 ]; then
-    echo ">> building erofs-utils into tools/bin (once)" >&2
+    echo ">> building erofs-utils into tools/bin (once per version)" >&2
     bash "$DEPS_ROOT/tools/build-erofs-utils.sh" >&2
   fi
   # secilc that reads Google's policy (Ubuntu 24.04 has 3.5, needs >= 3.8): same, for the build's
