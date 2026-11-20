@@ -115,3 +115,11 @@ if grep -q '(type vendor_mesa_prop)' "$S/vendor_sepolicy.cil"; then
 CIL
   rm -f "$S"/precompiled_sepolicy "$S"/precompiled_sepolicy.*.sha256
 else note "gfx-mesa: no vendor_mesa_prop type in the vendor policy (renamed?): mediacodec's Mesa denials stay"; fi
+
+# 7. Mesa's VA driver in the codec service lowers its worker threads' priority (sched_setscheduler),
+# which the service's seccomp filter doesn't allow: SIGSYS abort + crash dump, 26-76 times per boot
+# (AMD tester). Allowed; appended in place (keeps the file's SELinux label).
+P=$V/etc/seccomp_policy/android.hardware.media.c2-cros-codecs-seccomp_policy
+if [ -f "$P" ]; then
+  grep -q '^sched_setscheduler:' "$P" || printf 'sched_setscheduler: 1\n' >> "$P"
+else note "gfx-mesa: no cros-codecs seccomp policy (renamed?): Mesa's VA in the codec service may be killed for sched_setscheduler"; fi

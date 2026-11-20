@@ -518,8 +518,10 @@ emulator system image unpacked on one core (first run), and the partition writes
   (`androidboot.churro.gfx`, set by GRUB from PCI: native / amd / nouveau / mesa / soft).
   `amd` (AMD GPUs amdgpu drives, GCN 3 and newer): Google's stack with RADV instead of ANV
   (ANGLE on Vulkan, Skia Vulkan), `vulkan.radeon.so` reporting Vulkan 1.3/1.4 on Android
-  (`radv-android-api-version.patch`, as for hasvk), radeonsi only for its VA-API driver (camera
-  HAL, codecs). GRUB takes the first AMD PCI device, following up to two PCIe switch levels (RX
+  (`radv-android-api-version.patch`, as for hasvk) and 2 queues in its graphics family on Android
+  (`radv-two-graphics-queues.patch`: HWUI needs 2, as for NVK; both submit to GFX ring 0, the
+  second on its own amdgpu context), radeonsi only for its VA-API driver (camera HAL, codecs;
+  the cros-codecs seccomp policy gets `sched_setscheduler`, which Mesa's VA threads call). GRUB takes the first AMD PCI device, following up to two PCIe switch levels (RX
   5000+), and leaves IDs radeon.ko claims (pre-GCN to GFX7, `CHURRO_RADEON_IDS` from
   drivers-extra) on their old path.
 
