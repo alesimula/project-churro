@@ -142,10 +142,10 @@ auto-mounts USB drives: internal and secondary disks stay untouched.
    the NDK (iris, crocus, nouveau, radeonsi, Zink, virgl, softpipe; NVK, hasvk, RADV), the
    allocator rebuilt for any Intel Xe GPU, nouveau and amdgpu, nouveau + NVIDIA firmware for
    machines without an iGPU; the stack is picked at boot (`androidboot.churro.gfx=`). AMD
-   (amdgpu + RADV) is built without AMD hardware to test on: untested. Hardware video decoding
-   (VA-API) includes H.264/H.265, which are patent-encumbered: fine for an image you build for
-   yourself (Churro never distributes images); `sudo CHURRO_MESA_CODECS=all_free ./churro.sh auto …`
-   leaves them out.
+   (amdgpu + RADV) has been tested on integrated GPUs, not yet on dedicated cards. Hardware video
+   decoding (VA-API) includes H.264/H.265, which are patent-encumbered: fine for an image you build
+   for yourself (Churro never distributes images);
+   `sudo CHURRO_MESA_CODECS=all_free ./churro.sh auto …` leaves them out.
    **Crypto** (`features/crypto-generic`): BoringSSL rebuilt from source for any Haswell+ CPU
    (Google's build assumes Panther Lake crypto instructions), exports checked against the image:
    system + vendor copies replaced, the APEX copies (Conscrypt, HttpEngine, Wi-Fi, ...) covered by
