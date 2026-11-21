@@ -49,8 +49,8 @@ second-stage `init` → panic.
 | Arrow/Lunar/Panther Lake, AMD Zen 5 | nothing | boots as-is (the MSI) |
 | Ice/Tiger/Rocket Lake, AMD Zen 4 | AVX-VNNI VEX + AVX-IFMA VEX (Zen 4: none) + SHA-NI (Ice/Tiger) | emulated in-kernel on `#UD` |
 | Alder/Raptor/Meteor Lake | AVX-IFMA VEX only (they have AVX-VNNI) | emulated (only the 2 IFMA ops trap) |
-| Haswell → Comet Lake, Zen 1–3 | + GFNI, SHA-NI, 256-bit VAES/VPCLMULQDQ (BoringSSL, compile-time on); Haswell also ADX | all 23 emulated; GFNI sits in hot loops (libyuv), VAES in AES-GCM → real perf cost |
-| pre-Haswell; Atom without AVX | AVX2/BMI2, everywhere | not feasible |
+| Haswell → Comet Lake, AMD Excavator (untested), Zen 1–3 | + GFNI, SHA-NI, 256-bit VAES/VPCLMULQDQ (BoringSSL, compile-time on); Haswell also ADX | all 23 emulated; GFNI sits in hot loops (libyuv), VAES in AES-GCM → real perf cost |
+| pre-Haswell; Atom without AVX; AMD before Excavator (Steamroller and older, Jaguar/Puma) | AVX2/BMI2, everywhere | not feasible |
 
 Plan (implemented): a kernel `#UD` handler (`kmod/patches/6.18/vex-emulate.patch`, built from
 `tools/vexemu/generate_traps.py`) emulates the 23 instructions userspace hits on a gap CPU:

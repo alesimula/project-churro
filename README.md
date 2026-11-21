@@ -6,11 +6,12 @@ Make **Googlebook OS** (Android 17 "android-desktop" / Aluminium) recovery image
 installable on generic x86_64 UEFI PCs, by *converting* Google's official image locally instead
 of redistributing a ported one (same idea as Project Croissant / chromefy for ChromeOS).
 
-> Status: **experimental** — boots to a usable Googlebook OS desktop on real hardware from USB:
+> Status: boots to a usable Googlebook OS desktop on real hardware from USB:
 > Arrow Lake laptop (Intel iGPU or NVIDIA via nouveau; Wi-Fi, audio, touchpad, Play Store / app
-> installs), and older machines down to Haswell (Tiger Lake, Broadwell, Haswell) through
-> an in-kernel emulator for the newer CPU instructions the image is compiled for — slower there.
-> CPU floor: Haswell (AVX2). See [`docs/`](docs/) and the hardware matrix in docs/05.
+> installs), AMD Ryzen with integrated graphics (dedicated AMD GPUs are supported too, untested),
+> and older machines down to Haswell (Tiger Lake, Broadwell, Haswell) through an in-kernel
+> emulator for the newer CPU instructions the image is compiled for — slower there. CPU floor:
+> Haswell / AMD Excavator (AVX2). See [`docs/`](docs/) and the hardware matrix in docs/05.
 
 ## Getting the recovery image
 
