@@ -139,4 +139,10 @@ CHURRO_PACK_DIR=$P
 CHURRO_MESA=$C/mesa/install
 CHURRO_MESA_SYSROOT=$C/mesa/sysroot
 EOF
+# Caches of other kernel builds (an earlier image's kernel, ~19 GB each): only needed to build that
+# image again, which would fetch and build them anew. (The kernel-$PROF-$BID-* cleanup above only
+# replaces this kernel build's older configurations.)
+for d in "$C"/src-* "$C"/kernel-* "$C"/packs-* "$C"/vmlinux.symvers-* "$C"/manifest_*.xml "$C"/prepared-*.env; do
+  [[ ${d##*/} =~ [-_]$BID([-.]|$) ]] || rm -rf "$d"
+done
 log "ready: $C/prepared-$BID.env"

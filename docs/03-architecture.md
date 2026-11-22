@@ -173,7 +173,10 @@ with success: `fetch_tar` treats a failed unpack as a failed download). Once the
 `prepare.sh` starts the big downloads the build needs later (emulator image, linux-firmware, NDK;
 `lib/prefetch.sh`) so they run during the kernel compile; the step that needs a file waits for its
 download (`flock`) instead of fetching it again. `cmd_auto` copies the 19 GB `.bin` into the output
-image in the background from the start (disk-bound; `cmd_build` joins it). Measured on 20 cores,
+image in the background from the start (disk-bound; `cmd_build` joins it). The cache is per kernel
+build (`src-`, `kernel-`, `packs-`, ... `<BID>`, the GKI build number): once `prepare.sh` is ready
+it removes every other kernel build's entries (~19 GB each; an earlier image would fetch and build
+them again). Measured on 20 cores,
 WSL: 2028 s → 1656 s (the copy wait 234 s → 10 s, vendor repack 250 s → 120 s; the kernel compile
 got ~2 min slower sharing the disk with the copy). Still not using the CPU: the toolchain downloads
 (~4 min, googlesource), BoringSSL/minigbm sources fetched from googlesource during the repack, the
