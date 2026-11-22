@@ -13,6 +13,10 @@ of redistributing a ported one (same idea as Project Croissant / chromefy for Ch
 > emulator for the newer CPU instructions the image is compiled for — slower there. CPU floor:
 > Haswell / AMD Excavator (AVX2). See [`docs/`](docs/) and the hardware matrix in docs/05.
 
+> Hybrid graphics (an integrated + a dedicated GPU): Android renders everything on one GPU, so
+> only one is used; on AMD Churro may still pick the dedicated one. If the BIOS offers it, set the
+> graphics mode to discrete or integrated explicitly, depending on which GPU you want.
+
 ## Getting the recovery image
 
 Download the official recovery image of a Googlebook from
