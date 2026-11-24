@@ -8,6 +8,9 @@ on early-init
     setprop ro.hwui.use_vulkan true
     setprop debug.renderengine.vulkan true
     setprop ro.vendor.hwc.use_overlay_planes false
+    # RADV_DEBUG=notmz: no protected memory. RADV offers it on RDNA2+ with TMZ; SurfaceFlinger
+    # then asks for protected blur buffers, which the linear amdgpu allocator can't make: abort
+    setprop debug.mesa.radv.debug notmz
 
 # minigbm allocates on the amdgpu GPU of the main screen (churro-density found it, display-density):
 # an APU + AMD dGPU laptop's first render node is the dGPU, its panel on the APU. ro.boot.: every
