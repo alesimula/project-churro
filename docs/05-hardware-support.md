@@ -274,7 +274,7 @@ older CPUs unsupported.
 |---|---|---|
 | Intel iGPU / Arc (Gen12+) | image's own `xe` + `firmware-extra` (GuC/HuC/GSC/DMC from linux-firmware); default graphics = Google's stack (ANGLE on ANV); hwcomposer color pipeline off; allocator rebuilt (`gfx-minigbm`): any Xe GPU, by graphics IP version | — (Arrow Lake verified on the MSI) |
 | Intel pre-Gen12 | our `i915` via `drivers-extra` (vendor_dlkm, linked to Google's `drm_display_helper`; aliases minus the 139 IDs `xe.ko` binds, so it only loads where `xe` can't) + Mesa `iris`/`crocus`; boot menu picks `mesa` for them | needs the `#UD` emulator (Haswell…Ice Lake CPUs). Gen4–8 primary planes have no alpha formats → `i915-gen4-primary-alpha.patch` (ARGB/ABGR scanned out as X formats, else the desktop is black). T300FA: setup renders, desktop fix to verify |
-| AMD | amdgpu module + firmware (distro module set); `amd` mode: RADV (ANGLE + Skia on Vulkan), radeonsi VA, minigbm linear amdgpu backend, GRUB detection (GCN 3+) | **works** on a tester's Ryzen 3 3250U (Raven2/Dali, Vega 3 iGPU; 2026-11-21, after `radv-two-graphics-queues.patch`); dGPUs and other generations untested; GFX6-7 (SI/CIK) and pre-GCN stay on radeon.ko + soft |
+| AMD | amdgpu module + firmware (distro module set); `amd` mode: RADV (ANGLE + Skia on Vulkan), radeonsi VA, minigbm linear amdgpu backend, GRUB detection (GCN 3+) | **works** on a tester's Ryzen 3 3250U (Raven2/Dali, Vega 3 iGPU; 2026-11-21, after `radv-two-graphics-queues.patch`); Radeon 780M (Phoenix, RDNA3; 2026-11-24): SurfaceFlinger crash loop on protected buffers → `notmz` (below), to verify; dGPUs and other generations untested; GFX6-7 (SI/CIK) and pre-GCN stay on radeon.ko + soft |
 | NVIDIA | `gpu-nouveau` (below): nouveau display + GSP firmware + allocator with VRAM buffers; GL = Zink on NVK (Kepler+) or nouveau GL (older), Vulkan = NVK; only where nothing else drives the display | MSI discrete mode (RTX 5070 Ti, GB205) works: panel + HDMI, Chrome (NVK AHB patch); hybrid machines: NVIDIA unused (HDMI wired to it stays dark) → reverse PRIME / render offload |
 | No usable GPU | no UI: no allocator backend for simpledrm/vgem, and Mesa's software path needs llvmpipe (LLVM) to import buffers | fallback allocator backend + llvmpipe |
 | VMs (QEMU) | virtio-gpu in the `gpu` pack; vgem loaded by `gfx-soft.rc` (not on machines with a GPU: it would take renderD128) | — |
@@ -550,8 +550,13 @@ Next steps (each needs hardware to test):
   buffers would need minigbm's own `amdgpu` backend (`DRV_AMDGPU`), which loads radeonsi through
   the DRI interface: a later speed-up, once linear works on hardware.
   Known limits (code review, not seen on hardware yet; details in docs/notes/amd-open-issues.md):
-  - An NVIDIA GPU wins over AMD at boot: Ryzen desktops have an iGPU while the monitor is on the
-    card. APU + NVIDIA laptops (panel on the APU) need the "AMD (amdgpu + RADV)" entry.
+  - An AMD GPU wins over NVIDIA at boot (2026-11-24; before, NVIDIA won and the hybrid guard
+    below then left APU + NVIDIA laptops with no GPU at all). Ryzen desktops with the monitor on an
+    NVIDIA card need the iGPU off in the BIOS, as before.
+  - Protected memory is off (`debug.mesa.radv.debug=notmz`, gfx-amd.rc): RADV offers it on RDNA2+
+    when amdgpu has TMZ, SurfaceFlinger then preallocates protected blur buffers, and the linear
+    allocator backend can't make protected buffers (abort, crash loop on a Radeon 780M). Protected
+    (DRM) video would need TMZ (`AMDGPU_GEM_CREATE_ENCRYPTED`) buffers in minigbm.
   - APU + AMD dGPU: handled: minigbm allocates on the render node of the main screen's GPU
     (churro-density -> `ro.boot.churro.render`).
   - GFX8 (Polaris, Carrizo/Stoney): the 256-byte pitch only matches RADV's own (64-byte) when
@@ -581,8 +586,8 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   function (the fbdev console; GKI has no fbdev), so our build replaces it - allowed only because
   it exports everything Google's does with identical CRCs, so xe keeps loading.
 - **Only where nothing else drives the display** (`kmod/patches/6.18/nouveau-hybrid-guard.patch`):
-  nouveau doesn't bind when another display controller exists. Hybrid laptops keep today's Intel
-  stack, and simpledrm isn't removed under it. `nouveau.hybrid=1` overrides. Desktops with the
+  nouveau doesn't bind when another display controller exists. Hybrid laptops keep the iGPU's
+  stack (Intel, or AMD: GRUB picks `amd` over `nouveau` too), and simpledrm isn't removed under it. `nouveau.hybrid=1` overrides. Desktops with the
   monitor on the NVIDIA card and the iGPU enabled: disable the iGPU in the BIOS.
 - **Firmware** via `firmware-extra` (nouveau declares 519 names): GSP-RM 570.144 only
   (`skip.txt` drops the 535 fallback); linux-firmware's WHENCE links become hardlinks (one 60 MB
