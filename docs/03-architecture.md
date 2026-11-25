@@ -65,8 +65,8 @@ ESP UUID into the new GRUB.
     the new `/dev/dri/card0` and the composer boots headless.
   - `sysfb-disable-any-gpu` — also drop it when the framebuffer belongs to *another* GPU
     (hybrid laptops with the boot framebuffer on an undriven dGPU).
-  - `nouveau-hybrid-guard` — nouveau binds only if no other display controller exists
-    (discrete-only laptops, desktops without iGPU); hybrid machines keep their iGPU stack.
+  - `nouveau-hybrid-guard` — next to another display controller, nouveau binds only on the
+    GPU that showed the boot screen; hybrid machines keep their iGPU stack.
     `nouveau.hybrid=1` overrides.
   - `nouveau-dsc-off` — turns off DSC the firmware left enabled (head + panel); nouveau
     never compresses, so an inherited DSC state garbles the picture or stalls the display.

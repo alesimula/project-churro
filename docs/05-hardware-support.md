@@ -550,9 +550,10 @@ Next steps (each needs hardware to test):
   buffers would need minigbm's own `amdgpu` backend (`DRV_AMDGPU`), which loads radeonsi through
   the DRI interface: a later speed-up, once linear works on hardware.
   Known limits (code review, not seen on hardware yet; details in docs/notes/amd-open-issues.md):
-  - An AMD GPU wins over NVIDIA at boot (2026-11-24; before, NVIDIA won and the hybrid guard
-    below then left APU + NVIDIA laptops with no GPU at all). Ryzen desktops with the monitor on an
-    NVIDIA card need the iGPU off in the BIOS, as before.
+  - An NVIDIA GPU wins over AMD at boot (GRUB can't see which GPU has the screen): right for
+    desktops with the monitor on the card and for MUX laptops in discrete mode, which can keep the
+    APU visible on PCI. Hybrid APU + NVIDIA laptops (panel on the APU) need the "AMD (amdgpu +
+    RADV)" entry: nouveau doesn't bind there (guard below).
   - Protected memory is off (`debug.mesa.radv.debug=notmz`, gfx-amd.rc): RADV offers it on RDNA2+
     when amdgpu has TMZ, SurfaceFlinger then preallocates protected blur buffers, and the linear
     allocator backend can't make protected buffers (abort, crash loop on a Radeon 780M). Protected
@@ -585,10 +586,13 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   them (107, all equal) and refuses to build on a mismatch. Google's `drm_ttm_helper` lacks one
   function (the fbdev console; GKI has no fbdev), so our build replaces it - allowed only because
   it exports everything Google's does with identical CRCs, so xe keeps loading.
-- **Only where nothing else drives the display** (`kmod/patches/6.18/nouveau-hybrid-guard.patch`):
-  nouveau doesn't bind when another display controller exists. Hybrid laptops keep the iGPU's
-  stack (Intel, or AMD: GRUB picks `amd` over `nouveau` too), and simpledrm isn't removed under it. `nouveau.hybrid=1` overrides. Desktops with the
-  monitor on the NVIDIA card and the iGPU enabled: disable the iGPU in the BIOS.
+- **Only on the boot display** (`kmod/patches/6.18/nouveau-hybrid-guard.patch`): with another
+  display controller present, nouveau binds only if its GPU showed the boot screen
+  (`video_is_primary_device`: the boot VGA device, or the firmware framebuffer is in its BARs).
+  Hybrid laptops keep their iGPU stack, and simpledrm isn't removed under it; MUX laptops in
+  discrete mode that leave the iGPU visible (Lenovo 83DX) and desktops with the monitor on the
+  card and the iGPU enabled get nouveau (2026-11-25, to verify; before, any other GPU blocked it).
+  `nouveau.hybrid=1` binds anyway.
 - **Firmware** via `firmware-extra` (nouveau declares 519 names): GSP-RM 570.144 only
   (`skip.txt` drops the 535 fallback); linux-firmware's WHENCE links become hardlinks (one 60 MB
   GSP image serves 18 chip names). +95 MB on vendor.

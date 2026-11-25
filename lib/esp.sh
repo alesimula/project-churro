@@ -152,10 +152,9 @@ if [ \"\$igpu\" = \"8086\" ]; then if regexp '^0*($xere)\$' \"\$igpudev\"; then 
   local d13="46a0|46a1|46a2|46a3|46a6|46a8|46aa|462a|4626|4628|46b0|46b1|46b2|46b3|46c0|46c1|46c2|46c3|46d0|46d1|46d2|46d3|46d4|a720|a721|a7a0|a7a1|a7a8|a7a9|a7aa|a7ab|a7ac|a7ad"
   d13="$d13|${d13^^}"
   # AMD GPUs radeon.ko claims (CHURRO_RADEON_IDS, drivers-extra): pre-GCN up to GFX7, which keep
-  # today's path. Every other AMD display device -> gfx=amd (amdgpu + Mesa's RADV), over an
-  # NVIDIA GPU too: hybrid Ryzen laptops have the panel on the APU, and nouveau doesn't bind next
-  # to another GPU anyway (nouveau-hybrid-guard.patch; desktops with the monitor on an NVIDIA
-  # card: iGPU off in the BIOS). The GPU is the
+  # today's path. Every other AMD display device -> gfx=amd (amdgpu + Mesa's RADV), unless an
+  # NVIDIA GPU was found: Ryzen desktops have an iGPU while the monitor is on the card (APU +
+  # NVIDIA laptops: the "AMD" boot entry). The GPU is the
   # first AMD device, or behind up to two PCIe switch levels (RX 5000 and newer: the card's own
   # upstream + downstream port come first; secondary bus = config byte 0x19). setpci prints
   # lower-case hex. Missed: AM3 boards, where an ATI chipset device comes first.
@@ -170,7 +169,7 @@ setpci -d 1002: -v amdbus 19.b
 set amdpos=\"\$amdbus:00.0\"
 if [ \"\$amdcls\" = 604 ]; then $rd; fi
 $hop
-if [ \"\$amdven\" = 1002 ]; then if [ \"\$amdcls\" = 300 -o \"\$amdcls\" = 302 -o \"\$amdcls\" = 380 ]; then if regexp '^0*($rre)\$' \"\$amddev\"; then set amdold=1; else set gfx=amd; fi; fi; fi"
+if [ \"\$amdven\" = 1002 ]; then if [ \"\$amdcls\" = 300 -o \"\$amdcls\" = 302 -o \"\$amdcls\" = 380 ]; then if regexp '^0*($rre)\$' \"\$amddev\"; then set amdold=1; elif [ \"\$gfx\" = soft ]; then set gfx=amd; fi; fi; fi"
   # features/disk-install: the installer runs instead of Android, on the firmware framebuffer
   # (nomodeset: a GPU driver would take the text console away; Google's xe has none), logged to
   # CHURRO-LOG like the debug entries. Not offered on an installed disk.
@@ -242,9 +241,9 @@ set dbg="console=tty0 console=ttyS1,115200 ignore_loglevel printk.devkmsg=on pan
 # Graphics stack from the GPUs present, appended last: a menu entry or extra_args naming one
 # comes first on the cmdline and wins (Android keeps the first value of a ro. property).
 # Intel iGPU (always at 00:02.0, hybrid laptops included) -> Googlebook's own stack (xe), or
-# Mesa on our i915 if xe doesn't know the GPU (pre-Gen12); else an AMD GPU amdgpu drives (GCN 3
-# and newer) -> amd; else an NVIDIA GPU (display controller class 0300/0302) -> nouveau (it only
-# binds with no other GPU present); else software rendering.
+# Mesa on our i915 if xe doesn't know the GPU (pre-Gen12); else an NVIDIA GPU (display
+# controller class 0300/0302) -> nouveau; else an AMD GPU amdgpu drives (GCN 3 and newer) ->
+# amd; else software rendering.
 set gfx=soft
 setpci -d 10de: -v nvclass CLASS_DEVICE
 if [ "\$nvclass" = "300" -o "\$nvclass" = "302" -o "\$nvclass" = "0300" -o "\$nvclass" = "0302" ]; then set gfx=nouveau; fi
