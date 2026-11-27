@@ -151,4 +151,6 @@ QEMU-only path; on real Intel hardware the path is iris + minigbm i915 (hardware
   `module_blacklist=amdgpu`: setup and desktop work (fresh install; an install set up earlier on the AMD stack showed glitches, cause
   unknown) → GRUB adds amdgpu to the vendor's `module_blacklist` in nouveau mode (a second `module_blacklist=` would replace Google's
   TPM/SPI list). Same boots: brightness doesn't work (drm_hwcomposer is denied the non-Intel backlights, unlabelled sysfs) and no
-  touchpad (`CONFIG_PINCTRL_AMD` not set: the APU's I2C controllers depend on its GPIO controller): both open.
+  touchpad (`CONFIG_PINCTRL_AMD` not set: the APU's I2C controllers depend on its GPIO controller) → `PINCTRL_AMD` built in
+  (generic profile `Y`), to verify; brightness still open. The same search showed ~550 distro modules silently dropped for
+  unmet dependencies (Lenovo/ThinkPad/Asus/Dell/HP laptop drivers among them) → dependency closure in the distro module set (docs/03).

@@ -52,6 +52,20 @@ ESP UUID into the new GRUB.
   (struct fields in netdevice.h, i2c.h, sched.h, …; they'd change hundreds of GKI CRCs) are kept
   off by leaving out whatever selects them (select chains followed automatically: e.g. iavf →
   NET_SHAPER, two I2C bus drivers → I2C_SLAVE).
+  Also taken (2026-11-27): the distro's built-in options that can be modules (=y tristates:
+  ACPI battery/AC/thermal, USB 1.1 OHCI/UHCI), and a **dependency closure**: options a taken
+  module needs but our config lacks, plus the distro's bool options in the driver directories
+  (vendor menus like `X86_PLATFORM_DRIVERS_DELL`, module sub-options like `MOUSE_PS2_ELANTECH`),
+  if the distro has them on. Rules: tristate → `=m`; a bool only if it has no code of its own in
+  the kernel image (Makefile: opens directories or adds files to an `=m` module; C `#ifdef` /
+  `IS_ENABLED` only in files of `=m` modules or local headers of module-only directories). What
+  those switch on in turn (defaults, selects) may not have own code or be tested in a core header
+  (`include/linux/*.h`, `include/net`, `arch/x86/include/asm`); the dependencies responsible are
+  left out (select edges first, then depends-on). Before: ~550 of the distro's modules were
+  silently dropped (unmet dependency: `ACPI_BATTERY` alone blocked ThinkPad/IdeaPad/Asus/MSI
+  laptop drivers; the Dell/HP menus, `PWM`). After: ~370 left (TV tuners, Atom/embedded PMICs,
+  NFC, parallel port, ...), +~200 modules. Config stage ~3.5 min longer, only when the kernel is
+  rebuilt. Real built-in drivers are the profile's `Y` list (PINCTRL_AMD, PWM, ...).
   Small built-in source fixes live in `kmod/patches/<series>/*.patch` (today `6.18/`; the folder
   is picked from the image's kernel, docs/09; applied copies recorded in
   `<src>/.churro-applied`, edited/removed patches reversed automatically, a patch the source
@@ -552,7 +566,7 @@ Files involved (each has comments explaining the why):
 | `kmod/patches/<series>/series.env` | the Arch config tag for that kernel series (docs/09) |
 | `versions/api<NN>.env` | pins that follow the image's Android release: emulator image, BoringSSL, minigbm (docs/09) |
 | `kmod/profiles/generic.conf` | `DISTRO_CONFIG` (URL of the pinned distro config, tag from the series' `series.env`), `DISTRO_DIRS` (regex: Kconfig file locations whose modules are taken), `DISTRO_DENY` (regex: symbols never taken), optional `DISTRO_BUILTIN_OK` (space-separated core options checked to be harmless) |
-| `kmod/build-kernel.sh` | the `if [ -n "${DISTRO_CONFIG:-}" ]` block: picks the symbols, adds them as `=m`, keeps core-struct options off (follows `select`/`imply` chains), refuses to weaken built-ins |
+| `kmod/build-kernel.sh` | the `if [ -n "${DISTRO_CONFIG:-}" ]` block: picks the symbols, adds them as `=m`, adds the dependency closure (`distro.dep` in the build dir; left out: `depdeny`), keeps core-struct options off (follows `select`/`imply` chains), refuses to weaken built-ins |
 | `tools/prepare.sh` | kABI check after the build: all GKI export CRCs must equal Google's `vmlinux.symvers`, else the kernel is rejected; copies `Module.symvers` into the kernel cache dir |
 | `features/drivers-extra/patch-vendor_dlkm.sh` (+ `skip.txt`) | installs every module of our build that the image lacks into vendor_dlkm, after a `depmod -e -E` ABI check against the image's own modules; prints what it left out and why |
 | `features/firmware-extra/patch-vendor.sh` (+ `skip.txt`, `extra.txt`) | firmware for all shipped modules: pinned linux-firmware release (`CHURRO_LINUX_FIRMWARE`), sof-bin (`CHURRO_SOF`), wireless-regdb (`CHURRO_REGDB`) |
