@@ -592,7 +592,11 @@ use: nouveau (kernel), NVK (Vulkan), Zink (GL on Vulkan) or nouveau GL (Mesa).
   Hybrid laptops keep their iGPU stack, and simpledrm isn't removed under it; MUX laptops in
   discrete mode that leave the iGPU visible (Lenovo 83DX) and desktops with the monitor on the
   card and the iGPU enabled get nouveau (2026-11-25, to verify; before, any other GPU blocked it).
-  `nouveau.hybrid=1` binds anyway.
+  `nouveau.hybrid=1` binds anyway. When GRUB picks nouveau (and on the "NVIDIA (nouveau)" entry) it
+  also adds `amdgpu` to the vendor `module_blacklist`: with amdgpu bound to a visible APU, nouveau's
+  buffers got pinned in system memory (an import by the other GPU) and every display commit failed
+  with EBUSY (`bo … pinned elsewhere`), black screen (Lenovo 83DX, discrete mode). Other entries
+  keep amdgpu.
 - **Firmware** via `firmware-extra` (nouveau declares 519 names): GSP-RM 570.144 only
   (`skip.txt` drops the 535 fallback); linux-firmware's WHENCE links become hardlinks (one 60 MB
   GSP image serves 18 chip names). +95 MB on vendor.

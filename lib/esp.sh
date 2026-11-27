@@ -234,6 +234,11 @@ fi; fi
 set vcmd="$vq"
 
 set base="\$vcmd \$qargs androidboot.boot_part_uuid=\$puuid androidboot.boot_source=\$boot_source"
+# nouveau entries: amdgpu off too. MUX laptops in discrete mode keep the APU visible on PCI, and
+# amdgpu importing nouveau's buffers pins them in system memory, which nouveau can't scan out.
+set qblk="\$qblk,amdgpu"
+set vcmd="$vq"
+set nvbase="\$vcmd \$qargs androidboot.boot_part_uuid=\$puuid androidboot.boot_source=\$boot_source"
 # debug: log on screen (fbcon) + serial, stop on errors instead of rebooting (panic=0; Android
 # init's fatal errors become panics; the image's lockup watchdogs only warn), plus feature debug
 # args (debug-log: boot.log on the CHURRO-LOG partition).
@@ -256,34 +261,37 @@ $vksel
 # before \$extra_args in every entry, so xe.enable_dpt=1 there switches DPT back on (later wins)
 setpci -s 00:02.0 -v igpudev DEVICE_ID
 if [ "\$igpu" = "8086" ]; then if regexp '^0*($d13)\$' "\$igpudev"; then set base="\$base xe.enable_dpt=0"; fi; fi
+# the default entries take nvbase when they pick nouveau, unless extra_args names another stack
+set abase="\$base"
+if [ "\$gfx" = nouveau ]; then if regexp 'androidboot\.churro\.gfx=' "\$extra_args"; then true; else set abase="\$nvbase"; fi; fi
 set gfx="androidboot.churro.gfx=\$gfx \$vk"
 # A submenu opens a new GRUB context that only sees exported variables: without this, the
 # "Graphics: other stacks" entries boot with an empty cmdline (no vendor args) and reboot at once.
-export base dbg extra_args vk gfx
+export base nvbase abase dbg extra_args vk gfx
 $splmode
 $splcfg
 
 menuentry "Googlebook OS (Churro)" {
-  linux (\$root)/churro/kernel \$base \$extra_args \$gfx$spl
+  linux (\$root)/churro/kernel \$abase \$extra_args \$gfx$spl
   initrd (\$root)/churro/initrd.img
 }
 menuentry "Googlebook OS (Churro) - debug (log on screen + CHURRO-LOG/boot.log)" {
-  linux (\$root)/churro/kernel \$base \$dbg \$extra_args \$gfx
+  linux (\$root)/churro/kernel \$abase \$dbg \$extra_args \$gfx
   initrd (\$root)/churro/initrd.img
 }
 # Intel xe display: DSB poll errors at init left the panel undetected (hwc went headless) on
 # Arrow Lake. Flags go last so they override the vendor cmdline's xe.enable_psr=1.
 menuentry "Googlebook OS (Churro) - debug, safe display (Intel: no DSB/PSR/DC states)" {
-  linux (\$root)/churro/kernel \$base \$dbg \$extra_args xe.enable_dsb=0 xe.enable_psr=0 xe.enable_dc=0 \$gfx
+  linux (\$root)/churro/kernel \$abase \$dbg \$extra_args xe.enable_dsb=0 xe.enable_psr=0 xe.enable_dc=0 \$gfx
   initrd (\$root)/churro/initrd.img
 }
 menuentry "Googlebook OS (Churro) - early debug (slow firmware console, for black screens)" {
-  linux (\$root)/churro/kernel \$base \$dbg earlycon=efifb \$extra_args \$gfx
+  linux (\$root)/churro/kernel \$abase \$dbg earlycon=efifb \$extra_args \$gfx
   initrd (\$root)/churro/initrd.img
 }
 submenu "Graphics: other stacks" {
   menuentry "NVIDIA (nouveau) - debug" {
-    linux (\$root)/churro/kernel \$base androidboot.churro.gfx=nouveau \$dbg \$extra_args
+    linux (\$root)/churro/kernel \$nvbase androidboot.churro.gfx=nouveau \$dbg \$extra_args
     initrd (\$root)/churro/initrd.img
   }
   menuentry "AMD (amdgpu + RADV) - debug" {
