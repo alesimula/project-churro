@@ -246,6 +246,11 @@ emulator system image unpacked on one core (first run), and the partition writes
   ours; a module with an unknown symbol or a CRC mismatch against Google's modules is left out
   (with everything that needs it), and a Google module is replaced by our build only if ours
   exports everything Google's does with identical CRCs (drm_ttm_helper: + the fbdev console).
+  GKI modules in system_dlkm too (2026-11-27): Google trims their exports to what its own modules
+  use (rfkill: 9 symbols; the ThinkPad/IdeaPad/Asus/Dell/HP laptop drivers need
+  `rfkill_set_sw_state` & co.), so ours (signed with our kernel's build key, which our kernel
+  trusts) goes into vendor_dlkm and every modules.dep reference to the system_dlkm copy is
+  pointed at it; system_dlkm itself is untouched.
   `skip.txt`: modules never added. i915 is added, but its aliases lose every device ID the
   image's `xe.ko` binds, so `ueventd` only loads it on pre-Gen12 Intel GPUs.
 * `firmware-extra` (default) — firmware the image's drivers need but the image lacks, installed

@@ -36,9 +36,9 @@ L=$(losetup -f --show -r -o "$off" --sizelimit "$size" "$CHURRO_SUPER")
 "$EROFS_BIN/fsck.erofs" --extract="$W/sys" "$L" >/dev/null || true; losetup -d "$L"
 mapfile -t SKIP < <(grep -vE '^\s*(#|$)' "$F/skip.txt")
 R=$W/dm/lib/modules/$rel; mkdir -p "$R/vendor" "$R/system"
-declare -A IMG OURS
+declare -A IMG OURS SYSF
 for f in "$D"/*.ko; do IMG[$(n "$f")]=v; ln -s "$f" "$R/vendor/"; done
-while read -r f; do IMG[$(n "$f")]=s; ln -sf "$f" "$R/system/"; done < <(find "$W/sys" -name '*.ko')
+while read -r f; do IMG[$(n "$f")]=s; SYSF[$(n "$f")]=$f; ln -sf "$f" "$R/system/"; done < <(find "$W/sys" -name '*.ko')
 while read -r f; do OURS[$(n "$f")]=$f; done < <(find "$MD" -name '*.ko')
 for m in "${!OURS[@]}"; do
   [ -n "${IMG[$m]:-}" ] && continue
@@ -57,11 +57,15 @@ exports() {
     echo "$ndx:$((16#$v)) $s"; done | sort > "$W/sym"
   join "$W/sym" "$W/val" | awk '{print $2, $3}' | sort
 }
-# replaceable <sym>: the Google vendor module our build exports <sym> from, if ours can stand in
+# replaceable <sym>: the Google module our build exports <sym> from, if ours can stand in. GKI
+# modules (system_dlkm) export only what Google's own modules use (KMI trimming: rfkill has 9 of
+# its exports, the laptop drivers need rfkill_set_sw_state & co.); ours, signed with our kernel's
+# build key, goes to vendor_dlkm and modules.dep points there instead (below)
 replaceable() {
-  local m; m=$(awk -v s="$1" '$2 == s {print $3; exit}' "$SV"); m=$(n "${m:-x}")
-  [ "${IMG[$m]:-}" = v ] && [ -n "${OURS[$m]:-}" ] || return 1
-  exports "${OURS[$m]}" > "$W/o"; exports "$D/$(basename "${OURS[$m]}")" > "$W/g" 2>/dev/null || return 1
+  local m g; m=$(awk -v s="$1" '$2 == s {print $3; exit}' "$SV"); m=$(n "${m:-x}")
+  [ -n "${OURS[$m]:-}" ] || return 1
+  case ${IMG[$m]:-} in v) g=$D/$(basename "${OURS[$m]}") ;; s) g=${SYSF[$m]} ;; *) return 1 ;; esac
+  exports "${OURS[$m]}" > "$W/o"; exports "$g" > "$W/g" 2>/dev/null || return 1
   comm -23 "$W/g" "$W/o" | grep -q . && return 1
   echo "$m"
 }
@@ -74,7 +78,9 @@ for i in $(seq 1 40); do
   while read -r f s why _; do
     m=$(n "$f"); grep -qx "$m" "$W/new" || continue      # Google's own modules: not ours to judge
     if [ "$why" = needs ] && r=$(replaceable "$s"); then
-      [ -n "${REPL[$r]:-}" ] || { REPL[$r]=1; rm -f "$R/vendor/$(basename "${OURS[$r]}")"; ln -s "${OURS[$r]}" "$R/vendor/"; changed=1; }
+      [ -n "${REPL[$r]:-}" ] || { REPL[$r]=${IMG[$r]}; rm -f "$R/vendor/$(basename "${OURS[$r]}")"
+        [ "${IMG[$r]}" = s ] && rm -f "$R/system/$(basename "${SYSF[$r]}")"
+        ln -s "${OURS[$r]}" "$R/vendor/"; changed=1; }
       continue
     fi
     [ -e "$R/vendor/$f.ko" ] || continue
@@ -82,7 +88,9 @@ for i in $(seq 1 40); do
   done < "$W/bad"
   [ $changed = 1 ] || break
 done
-for r in "${!REPL[@]}"; do echo "   vendor_dlkm: $r.ko replaced by our build (same exports and CRCs, plus what our modules need)"; echo "$r" >> "$W/new"; done
+for r in "${!REPL[@]}"; do
+  [ "${REPL[$r]}" = s ] && w="system_dlkm's $r.ko replaced by our build in vendor_dlkm" || w="$r.ko replaced by our build"
+  echo "   vendor_dlkm: $w (same exports and CRCs, plus what our modules need)"; echo "$r" >> "$W/new"; done
 
 # install with the label vendor modules have
 lbl=$(getfattr --absolute-names --only-values -n security.selinux "$(ls "$D"/*.ko | head -1)")
@@ -97,6 +105,9 @@ SP=$(grep -oE '/system[a-z_]*/lib/modules/[^ :]*/' "$D/modules.dep" | head -1 ||
 sed -E "s#(^| )vendor/#\1$VP/#g; s#(^| )system/#\1$SP#g" "$R/modules.dep" |
   grep -F -f <(sed "s#^#$VP/#; s#\$#:#" "$W/ours") > "$W/dep.new" || true
 grep -v -F -f <(sed "s#^#$VP/#; s#\$#:#" "$W/ours") "$D/modules.dep" > "$W/dep" || true
+# replaced system_dlkm modules: Google's modules.dep line goes, references point at our copy
+for r in "${!REPL[@]}"; do [ "${REPL[$r]}" = s ] || continue; b=$(basename "${SYSF[$r]}")
+  grep -vF "$SP$b:" "$W/dep" | sed -E "s#(^| )$SP$b( |\$)#\1$VP/$b\2#g" > "$W/dep2"; mv "$W/dep2" "$W/dep"; done
 cat "$W/dep" "$W/dep.new" > "$D/modules.dep"
 { cat "$D/modules.alias"
   while read -r b; do m=$(n "$b"); modinfo -F alias "$D/$b" 2>/dev/null |
