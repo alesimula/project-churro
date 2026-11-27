@@ -50,6 +50,19 @@ cat >> "$S/vendor_sepolicy.cil" <<EOF
 (allow get_variant_audio kmsg_device_$V (chr_file (getattr open write append)))
 (dontaudit get_variant_audio self (capability (sys_admin)))
 EOF
+# Backlight: drm_hwcomposer sets the panel's brightness through the backlight it finds in
+# /sys/class/backlight (label sysfs_leds), but Google's policy labels only its own boards' nodes
+# (the Intel iGPU's card0-eDP-1/intel_backlight): amdgpu_bl*, nv_backlight, acpi_video*,
+# nvidia_wmi_ec_backlight, vendor WMI ones, ... stayed plain sysfs, so the brightness keys and
+# slider did nothing (denied, Lenovo 83DX). Same label for every backlight: class devices sit
+# under a GPU connector (drm/cardN/cardN-<conn>/<name>) or in a "backlight" dir of their parent.
+# "*" also matches "/" in genfscon wildcards, so each pattern covers the node and its files.
+cat >> "$S/vendor_sepolicy.cil" <<'EOF'
+; Project Churro display-density: every backlight class device like Google's intel_backlight
+(genfscon sysfs "/devices/*/backlight/*" (u object_r sysfs_leds ((s0) (s0))))
+(genfscon sysfs "/devices/*/drm/card*/card*-*/*backlight*" (u object_r sysfs_leds ((s0) (s0))))
+(genfscon sysfs "/devices/*/drm/card*/card*-*/amdgpu_bl*" (u object_r sysfs_leds ((s0) (s0))))
+EOF
 rm -f "$S"/precompiled_sepolicy "$S"/precompiled_sepolicy.*.sha256
 
 R=$T/etc/init/churro-density.rc
