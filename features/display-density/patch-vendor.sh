@@ -62,6 +62,9 @@ cat >> "$S/vendor_sepolicy.cil" <<'EOF'
 (genfscon sysfs "/devices/*/backlight/*" (u object_r sysfs_leds ((s0) (s0))))
 (genfscon sysfs "/devices/*/drm/card*/card*-*/*backlight*" (u object_r sysfs_leds ((s0) (s0))))
 (genfscon sysfs "/devices/*/drm/card*/card*-*/amdgpu_bl*" (u object_r sysfs_leds ((s0) (s0))))
+; keyboard backlights (LED class "<device>::kbd_backlight": laptop platform drivers, keyboards'
+; own LEDs) like Google's GOOG0002 one: system_server's input reader adjusts them
+(genfscon sysfs "/devices/*::kbd_backlight*" (u object_r sysfs_keyboard_backlight ((s0) (s0))))
 EOF
 rm -f "$S"/precompiled_sepolicy "$S"/precompiled_sepolicy.*.sha256
 

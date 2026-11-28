@@ -60,6 +60,16 @@ for rc in "$V"/etc/init/android.hardware.camera.provider-usb-service.android-des
   [ -f "$rc" ] || continue
   c=$(sed '/^service /a\    setenv NOUVEAU_USE_ZINK false' "$rc"); printf '%s\n' "$c" > "$rc"
 done
+# Camera effects (portrait relight, background blur, face retouch; VcEffects): Google's config runs
+# their models on the NPU, which only Googlebooks have and which is off here (intel_vpu blocked,
+# churro.sh); LiteRT's NPU compile then fails, SetEffect stalls and the camera HAL aborts on every
+# open while the effect stays switched on (Lenovo LOQ 15AHP9, docs/02). CPU instead: LiteRT's own
+# CPU path (XNNPack), the one the face detector already uses. In place: keeps the SELinux label.
+cfg=$V/etc/camera/effect_config_usb.json
+if [ "${CHURRO_NPU:-false}" != true ] && grep -q '_litert_accelerator": *"Npu"' "$cfg" 2>/dev/null; then
+  c=$(sed -E 's/(_litert_accelerator": *)"Npu"/\1"Cpu"/' "$cfg"); printf '%s\n' "$c" > "$cfg"
+  echo "   vendor: camera effects on the CPU instead of the NPU ($(grep -c '"Cpu"' "$cfg") models)"
+fi
 while [ ${#todo[@]} -gt 0 ]; do
   f=${todo[0]}; todo=("${todo[@]:1}"); [ -f "$f" ] || continue
   for n in $(readelf -d "$f" | awk '/NEEDED/ {gsub(/[][]/, "", $NF); print $NF}'); do
